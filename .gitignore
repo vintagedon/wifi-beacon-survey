@@ -1,0 +1,103 @@
+# =============================================================================
+# Survey evidence and generated outputs
+# =============================================================================
+# Capture artifacts live outside the repository, under
+# storage-mounted/wifi-beacon-survey. These rules are a backstop, not the
+# storage mechanism. If one of them ever fires on a real file, something wrote
+# to the wrong place and the collector default needs checking.
+*.pcap
+*.pcapng
+*.tsv
+*.parquet
+*.log
+phy-info.txt
+sweeps/
+probe-out/
+scripts/wifi-beacon-samples/
+scripts/probe-out/
+
+# Test fixtures are the deliberate exception: small, synthetic, and tracked so
+# the regression suite runs from a clean clone with no external data volume.
+# Never place real capture output here.
+!tests/fixtures/**/*.tsv
+!tests/fixtures/**/*.pcap
+!tests/fixtures/**/*.parquet
+
+# =============================================================================
+# Private working context
+# =============================================================================
+# Deny-by-default with an explicit allowlist. A new context unit stays ignored
+# until it is reviewed and named here, which is the intended friction.
+internal-files/*
+!internal-files/README.md
+!internal-files/2026-08-17-wifi-beacon-survey-one-pager.md
+
+# Agent recycle convention: the directory is tracked, its contents are not
+recycle-bin/*
+!recycle-bin/README.md
+
+# Local markers for directories awaiting a proper README
+*-pending.md
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# =============================================================================
+# Local environment
+# =============================================================================
+.env
+.env.*
+!.env.example
+.envrc
+
+# =============================================================================
+# Credentials
+# =============================================================================
+# This repository is public. These patterns should never match anything; they
+# exist so that an accidental key drop fails to stage rather than becoming
+# permanent history.
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*credentials*
+
+# =============================================================================
+# Agent session state
+# =============================================================================
+.claude/
+.codex/
+.aider*
+.kilocode/
+
+# =============================================================================
+# Editor and operating-system noise
+# =============================================================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
