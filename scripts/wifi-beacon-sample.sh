@@ -42,6 +42,16 @@
 #   The data root is /opt/agents/repos/storage-mounted/wifi-beacon-survey,
 #   outside this repository.
 #
+# RUN-LEVEL METADATA
+#   Every run writes instrument.json alongside the capture: run status
+#   (sweep / skipped_no_interface / failed), the active regulatory domain,
+#   and the USB controller/bus the adapter sits on. An absent interface
+#   produces a manifest-shaped skip record (headers, no frequency rows) and
+#   exits 0: instrument downtime is an observation in the series, not an
+#   error. Machine check for "receiver was down": instrument.json
+#   run_status == "skipped_no_interface". A completed sweep, however empty,
+#   has run_status == "sweep" and one manifest row per frequency.
+#
 # =============================================================================
 
 set -Eeuo pipefail
@@ -55,6 +65,11 @@ DWELL=10
 BANDS="2.4 5 6"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_OUT="/opt/agents/repos/storage-mounted/wifi-beacon-survey/sweeps"
+
+# Capture semantics. These are recorded verbatim into instrument.json so a run
+# directory states what was captured without consulting the source.
+SNAPLEN=1024
+BPF_FILTER="type mgt subtype beacon"
 
 # Run under sudo, so files land root-owned by default. Ownership across the
 # agent tree is normalized to <invoking user>:agents; without this the sweep
@@ -83,13 +98,137 @@ Output (in <BASE_OUT>/<timestamp>/):
   freq-<MHz>.tsv    Per-frequency BSSID summary
   frequencies.tsv   Sweep manifest: every kernel-listed frequency and its outcome
   aggregate.tsv     All BSSID observations across the sweep
+  instrument.json   Run status, regulatory domain, USB location, capture parameters
   run.log           Full run log
+
+When the interface is absent the run directory still exists and carries
+frequencies.tsv and aggregate.tsv headers, run.log, and instrument.json with
+run_status=skipped_no_interface; the script exits 0. Instrument downtime is a
+recorded observation, not an error.
 EOF
 }
 
 die() {
     echo "FATAL: $*" >&2
     exit 1
+}
+
+# -----------------------------------------------------------------------------
+# Instrument-context snapshots. Both are read-only and tolerate an absent
+# receiver: a run that records downtime must still record the host facts that
+# explain it.
+# -----------------------------------------------------------------------------
+
+# The regulatory domain decides which frequencies exist. It has reverted to
+# world (00) across driver reloads on this host, silently changing the swept
+# frequency set, so every run records it: the global domain first, then the
+# PHY's own country when the driver self-manages one (phy section of
+# `iw reg get`).
+reg_domain_snapshot() {
+    local reg
+    reg="$(iw reg get 2>/dev/null || true)"
+    REG_DOMAIN_GLOBAL="$(awk '/^country /{sub(/:$/, "", $2); print $2; exit}' <<<"$reg")"
+    REG_DOMAIN_PHY="$(awk '/^phy#/{p=1; next} p && /^country /{sub(/:$/, "", $2); print $2; exit}' <<<"$reg")"
+    [[ -n "$REG_DOMAIN_GLOBAL" ]] || REG_DOMAIN_GLOBAL="unresolved"
+}
+
+# Which USB controller and bus the adapter enumerated on. Enumeration fails
+# on one of this host's two controllers, and which port the adapter occupies
+# is a physical fact no configuration holds, so the run directory carries it.
+# Resolved from sysfs (interface -> USB interface dir -> device -> root hub ->
+# PCI address); empty strings when the netdev is absent.
+usb_location_snapshot() {
+    USB_DEVICE=""; USB_BUSNUM=""; USB_PORT=""
+    USB_CONTROLLER_PCI=""; USB_SPEED=""; USB_DRIVER=""
+    local dev usbdev busdev ctrl
+    dev="$(readlink -f "/sys/class/net/${IFACE}/device" 2>/dev/null)" || return 0
+    [[ "$dev" == */usb*/*/*:* ]] || return 0
+    usbdev="${dev%/*}"
+    busdev="${usbdev%/*}"
+    USB_DEVICE="$(basename "$usbdev")"
+    USB_BUSNUM="$(cat "${usbdev}/busnum" 2>/dev/null || true)"
+    USB_PORT="$(cat "${usbdev}/devpath" 2>/dev/null || true)"
+    USB_SPEED="$(cat "${usbdev}/speed" 2>/dev/null || true)"
+    USB_DRIVER="$(basename "$(readlink "${dev}/driver" 2>/dev/null)" 2>/dev/null || true)"
+    ctrl="$(readlink -f "$busdev" 2>/dev/null)" || return 0
+    USB_CONTROLLER_PCI="$(basename "$(dirname "$ctrl")")"
+}
+
+# Write the run-level metadata artifact atomically (temp file then rename), so
+# a crash mid-write never leaves a truncated instrument.json. INSTRUMENT_FINALIZED
+# is set only after a successful terminal write, so the EXIT trap still records
+# "failed" if the write itself fails or the script dies before a terminal
+# status. The non-terminal "running" write never finalizes.
+write_instrument_json() {
+    local status="$1" reason="${2:-}"
+    INSTRUMENT_STATUS="$status" \
+    INSTRUMENT_REASON="$reason" \
+    INSTRUMENT_IFACE="$IFACE" \
+    INSTRUMENT_PRESENT="$INTERFACE_PRESENT" \
+    INSTRUMENT_PHY="${PHY:-}" \
+    INSTRUMENT_REG_GLOBAL="$REG_DOMAIN_GLOBAL" \
+    INSTRUMENT_REG_PHY="${REG_DOMAIN_PHY:-}" \
+    INSTRUMENT_USB_BUS="${USB_BUSNUM:-}" \
+    INSTRUMENT_USB_PORT="${USB_PORT:-}" \
+    INSTRUMENT_USB_DEVICE="${USB_DEVICE:-}" \
+    INSTRUMENT_USB_CONTROLLER="${USB_CONTROLLER_PCI:-}" \
+    INSTRUMENT_USB_SPEED="${USB_SPEED:-}" \
+    INSTRUMENT_USB_DRIVER="${USB_DRIVER:-}" \
+    INSTRUMENT_DWELL="$DWELL" \
+    INSTRUMENT_BANDS="$BANDS" \
+    INSTRUMENT_SNAPLEN="$SNAPLEN" \
+    INSTRUMENT_FILTER="$BPF_FILTER" \
+    INSTRUMENT_STARTED="$STARTED_UTC" \
+    python3 - "$INSTRUMENT" <<'PY'
+import json
+import os
+import sys
+
+def opt(name):
+    value = os.environ.get(name, "")
+    return value if value else None
+
+doc = {
+    "schema": "wifi-beacon-survey/instrument/1",
+    "run_status": os.environ["INSTRUMENT_STATUS"],
+    "skip_reason": opt("INSTRUMENT_REASON"),
+    "started_utc": opt("INSTRUMENT_STARTED"),
+    "interface": opt("INSTRUMENT_IFACE"),
+    "interface_present": os.environ["INSTRUMENT_PRESENT"] == "1",
+    "phy": opt("INSTRUMENT_PHY"),
+    "regulatory_domain": opt("INSTRUMENT_REG_GLOBAL"),
+    "regulatory_domain_phy": opt("INSTRUMENT_REG_PHY"),
+    "usb": {
+        "bus": opt("INSTRUMENT_USB_BUS"),
+        "port": opt("INSTRUMENT_USB_PORT"),
+        "device": opt("INSTRUMENT_USB_DEVICE"),
+        "controller_pci": opt("INSTRUMENT_USB_CONTROLLER"),
+        "speed_mbps": opt("INSTRUMENT_USB_SPEED"),
+        "driver": opt("INSTRUMENT_USB_DRIVER"),
+    },
+    "capture": {
+        "dwell_seconds": int(os.environ["INSTRUMENT_DWELL"]),
+        "bands": os.environ["INSTRUMENT_BANDS"],
+        "snaplen": int(os.environ["INSTRUMENT_SNAPLEN"]),
+        "bpf_filter": os.environ["INSTRUMENT_FILTER"],
+    },
+}
+
+tmp = sys.argv[1] + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, sys.argv[1])
+PY
+
+    # Finalize only after the write above has succeeded. A failed write leaves
+    # INSTRUMENT_FINALIZED unset so the EXIT trap records "failed"; "running"
+    # never finalizes. The if-form (not a trailing `&&`) keeps this function's
+    # exit status 0 under `set -e`, since a bare `[[ ]] &&` as the last line
+    # would return 1 for the "running" call and abort the script.
+    if [[ "$status" != "running" ]]; then
+        INSTRUMENT_FINALIZED=1
+    fi
 }
 
 # =============================================================================
@@ -129,14 +268,23 @@ for cmd in iw ip tcpdump python3 date mkdir mktemp awk tee seq grep; do
     command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
 done
 
-if ! ip link show "$IFACE" >/dev/null 2>&1; then
-    die "interface not found: $IFACE"
-fi
-
 if [[ "$IFACE" == "wlo1" ]]; then
     die "refusing to operate on the ml01 management interface wlo1"
 fi
 
+# Instrument context is snapshotted before anything else: these host facts
+# exist (or demonstrably do not) whether or not the receiver enumerated, and
+# the skip record must carry them too.
+STARTED_UTC="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+reg_domain_snapshot
+usb_location_snapshot
+INTERFACE_PRESENT=0
+ip link show "$IFACE" >/dev/null 2>&1 && INTERFACE_PRESENT=1
+
+# The output directory is created before the interface is judged, not after.
+# A run against a missing receiver must leave its skip record on disk; the
+# ten-day 2026-08-17..27 outage was invisible precisely because failing runs
+# exited before creating anything.
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 OUTDIR="${BASE_OUT%/}/$STAMP"
 mkdir -p "$OUTDIR"
@@ -147,14 +295,23 @@ AGG="$OUTDIR/aggregate.tsv"
 MANIFEST="$OUTDIR/frequencies.tsv"
 PHYINFO="$OUTDIR/phy-info.txt"
 FREQ_TABLE="$OUTDIR/.freq-table.tsv"
+INSTRUMENT="$OUTDIR/instrument.json"
 
 exec > >(tee -a "$LOG") 2>&1
 
 # Keep at most one tcpdump alive if the script exits mid-dwell.
 TCPDUMP_PID=""
+INSTRUMENT_FINALIZED=0
 cleanup() {
     if [[ -n "$TCPDUMP_PID" ]] && kill -0 "$TCPDUMP_PID" 2>/dev/null; then
         kill -INT "$TCPDUMP_PID" 2>/dev/null || true
+    fi
+
+    # A run that dies without reaching a terminal status records "failed"
+    # rather than lingering as "running" forever. Best-effort: the artifacts
+    # already on disk are the primary evidence either way.
+    if [[ "$INSTRUMENT_FINALIZED" -ne 1 && -n "${INSTRUMENT:-}" ]]; then
+        write_instrument_json "failed" "script exited before completion; see run.log" || true
     fi
 
     # The sweep needs root for monitor-mode control, so every artifact would
@@ -169,12 +326,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+write_instrument_json "running"
+
 echo "Tri-band beacon discovery sweep starting"
-echo "  interface : $IFACE"
-echo "  dwell     : ${DWELL}s/frequency"
-echo "  bands     : ${BANDS}"
-echo "  output    : $OUTDIR"
+echo "  interface          : $IFACE"
+if [[ "$INTERFACE_PRESENT" -eq 1 ]]; then
+    echo "  interface present  : yes"
+else
+    echo "  interface present  : NO (ip link show $IFACE failed)"
+fi
+echo "  regulatory domain  : ${REG_DOMAIN_GLOBAL} (phy: ${REG_DOMAIN_PHY:-none})"
+if [[ -n "$USB_DEVICE" ]]; then
+    echo "  usb location       : bus ${USB_BUSNUM} port ${USB_PORT} (${USB_DEVICE}) on ${USB_CONTROLLER_PCI} at ${USB_SPEED}M, driver ${USB_DRIVER:-unbound}"
+else
+    echo "  usb location       : not resolvable (no USB netdev for $IFACE in sysfs)"
+fi
+echo "  dwell              : ${DWELL}s/frequency"
+echo "  bands              : ${BANDS}"
+echo "  capture            : snaplen ${SNAPLEN}, filter '${BPF_FILTER}'"
+echo "  output             : $OUTDIR"
 echo
+
+# -----------------------------------------------------------------------------
+# Instrument absence: record the skip and exit 0. Downtime is an observation
+# in a longitudinal series, not a scheduler error. The record is
+# manifest-shaped (same headers, zero frequency rows) plus
+# instrument.json run_status=skipped_no_interface, which is the machine
+# discriminator from a sweep that ran and found nothing: an empty sweep has
+# run_status=sweep and one manifest row per frequency.
+# -----------------------------------------------------------------------------
+
+if [[ "$INTERFACE_PRESENT" -ne 1 ]]; then
+    printf 'band\tfrequency_mhz\tchannel\tregulatory_state\tsample_status\tdwell_seconds\tpcap_file\tbssid_count\tbeacon_count\terror\n' > "$MANIFEST"
+    printf 'band\tfrequency_mhz\tchannel\tbssid\tssid\tbeacons\tbeacon_interval_tu\trssi_min_dbm\trssi_mean_dbm\trssi_max_dbm\tfirst_seen\tlast_seen\tbeacon_reception_ratio\n' > "$AGG"
+    echo "SKIP: receiver absent - interface $IFACE not present; no frequencies attempted"
+    write_instrument_json "skipped_no_interface" "ip link show $IFACE failed at run start"
+    echo "SKIP: skip record written to $OUTDIR (run_status=skipped_no_interface)"
+    exit 0
+fi
 
 # -----------------------------------------------------------------------------
 # Interface handling: resolve PHY, ensure ordinary passive monitor mode, up.
@@ -523,9 +712,9 @@ while IFS=$'\t' read -r BAND FREQ CHAN REGSTATE; do
     tcpdump \
         -i "$IFACE" \
         -U \
-        -s 1024 \
+        -s "$SNAPLEN" \
         -w "$PCAP" \
-        'type mgt subtype beacon' \
+        "$BPF_FILTER" \
         >/dev/null 2>"$TCPDUMP_LOG" &
     TCPDUMP_PID=$!
 
@@ -686,3 +875,8 @@ if sampled + empty == 0:
     print("ERROR: no frequencies were successfully sampled", file=sys.stderr)
     sys.exit(1)
 PY
+
+# Terminal success: the run directory is a completed sweep. The terminal
+# summary exits non-zero on capture errors, so reaching here means the sweep
+# ran to completion even if every frequency was empty.
+write_instrument_json "sweep"
