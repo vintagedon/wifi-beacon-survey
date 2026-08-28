@@ -7,6 +7,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -16,6 +17,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "wifi-beacon-sample.sh"
+# Mirrors the collector's command-availability loop, which runs before the skip
+# path. On a root host missing any of these the script dies at that loop with a
+# non-zero exit, which would make this test report a false failure.
+_REQUIRED_TOOLS = ("iw", "ip", "tcpdump", "python3", "date", "mkdir", "mktemp", "awk", "tee", "seq", "grep")
 
 
 def embedded_summarizer() -> str:
@@ -108,6 +113,10 @@ class CollectorParserTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(os.geteuid() == 0, "skip-record path requires root")
+    @unittest.skipUnless(
+        all(shutil.which(t) for t in _REQUIRED_TOOLS),
+        "skip-record path requires the collector's host tools",
+    )
     def test_skip_record_on_missing_interface(self):
         # A run against an absent interface must leave a manifest-shaped skip
         # record and exit 0: instrument downtime is a recorded observation, not

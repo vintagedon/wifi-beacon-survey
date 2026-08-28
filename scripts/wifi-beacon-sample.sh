@@ -71,6 +71,14 @@ BASE_OUT="/opt/agents/repos/storage-mounted/wifi-beacon-survey/sweeps"
 SNAPLEN=1024
 BPF_FILTER="type mgt subtype beacon"
 
+# Output schema headers, frozen by the comparability constraint and defined
+# once so the skip path and the sweep path cannot drift: a skip record's value
+# depends on being byte-identical in shape to a real sweep. The per-frequency
+# summary header inside summarize_pcap is the same shape but lives in its own
+# Python heredoc and cannot share these.
+MANIFEST_HEADER=$'band\tfrequency_mhz\tchannel\tregulatory_state\tsample_status\tdwell_seconds\tpcap_file\tbssid_count\tbeacon_count\terror'
+AGG_HEADER=$'band\tfrequency_mhz\tchannel\tbssid\tssid\tbeacons\tbeacon_interval_tu\trssi_min_dbm\trssi_mean_dbm\trssi_max_dbm\tfirst_seen\tlast_seen\tbeacon_reception_ratio'
+
 # Run under sudo, so files land root-owned by default. Ownership across the
 # agent tree is normalized to <invoking user>:agents; without this the sweep
 # directory would be the one place that isn't, and the group would be whatever
@@ -125,11 +133,24 @@ die() {
 # PHY's own country when the driver self-manages one (phy section of
 # `iw reg get`).
 reg_domain_snapshot() {
-    local reg
+    local reg phynum
     reg="$(iw reg get 2>/dev/null || true)"
     REG_DOMAIN_GLOBAL="$(awk '/^country /{sub(/:$/, "", $2); print $2; exit}' <<<"$reg")"
-    REG_DOMAIN_PHY="$(awk '/^phy#/{p=1; next} p && /^country /{sub(/:$/, "", $2); print $2; exit}' <<<"$reg")"
     [[ -n "$REG_DOMAIN_GLOBAL" ]] || REG_DOMAIN_GLOBAL="unresolved"
+
+    # Scope the self-managed block to THIS interface's PHY. iw reg get can list
+    # several phy# sections (the host also has wlo1), so taking the first one
+    # would attribute another radio's domain to the capture adapter. An absent
+    # interface or a non-self-managed driver correctly leaves this empty.
+    REG_DOMAIN_PHY=""
+    phynum="$(iw dev "$IFACE" info 2>/dev/null | awk '$1=="wiphy" {print $2; exit}' || true)"
+    if [[ -n "$phynum" ]]; then
+        REG_DOMAIN_PHY="$(awk -v want="phy#${phynum}" '
+            $1==want {p=1; next}
+            /^phy#/{p=0}
+            p && /^country /{sub(/:$/, "", $2); print $2; exit}
+        ' <<<"$reg")"
+    fi
 }
 
 # Which USB controller and bus the adapter enumerated on. Enumeration fails
@@ -140,18 +161,29 @@ reg_domain_snapshot() {
 usb_location_snapshot() {
     USB_DEVICE=""; USB_BUSNUM=""; USB_PORT=""
     USB_CONTROLLER_PCI=""; USB_SPEED=""; USB_DRIVER=""
-    local dev usbdev busdev ctrl
+    local dev usbdev node
     dev="$(readlink -f "/sys/class/net/${IFACE}/device" 2>/dev/null)" || return 0
     [[ "$dev" == */usb*/*/*:* ]] || return 0
     usbdev="${dev%/*}"
-    busdev="${usbdev%/*}"
     USB_DEVICE="$(basename "$usbdev")"
     USB_BUSNUM="$(cat "${usbdev}/busnum" 2>/dev/null || true)"
     USB_PORT="$(cat "${usbdev}/devpath" 2>/dev/null || true)"
     USB_SPEED="$(cat "${usbdev}/speed" 2>/dev/null || true)"
     USB_DRIVER="$(basename "$(readlink "${dev}/driver" 2>/dev/null)" 2>/dev/null || true)"
-    ctrl="$(readlink -f "$busdev" 2>/dev/null)" || return 0
-    USB_CONTROLLER_PCI="$(basename "$(dirname "$ctrl")")"
+
+    # The controller PCI address is the parent of the usbN root-hub directory.
+    # Walk up the resolved device path to that root hub rather than assuming the
+    # adapter sits one level below it: behind a USB hub the naive parent is the
+    # hub device, and basename(dirname()) would record "usbN" instead of a PCI
+    # address, silently corrupting the controller field.
+    node="$dev"
+    while [[ "$node" == /* && "$node" != "/" ]]; do
+        if [[ "$(basename "$node")" =~ ^usb[0-9]+$ ]]; then
+            USB_CONTROLLER_PCI="$(basename "$(dirname "$node")")"
+            break
+        fi
+        node="$(dirname "$node")"
+    done
 }
 
 # Write the run-level metadata artifact atomically (temp file then rename), so
@@ -326,6 +358,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# EXIT alone does not fire on an untrapped signal, and the realistic kill path
+# for a hung hourly run is the playbook timeout (SIGTERM). Trap the terminating
+# signals so cleanup runs and run_status becomes "failed", then re-raise with
+# the traps cleared, so the exit status still reflects the signal and cleanup
+# does not run twice.
+on_signal() {
+    local sig="$1"
+    trap - EXIT INT TERM HUP
+    cleanup
+    kill -s "$sig" "$$"
+}
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
+
 write_instrument_json "running"
 
 echo "Tri-band beacon discovery sweep starting"
@@ -357,8 +404,8 @@ echo
 # -----------------------------------------------------------------------------
 
 if [[ "$INTERFACE_PRESENT" -ne 1 ]]; then
-    printf 'band\tfrequency_mhz\tchannel\tregulatory_state\tsample_status\tdwell_seconds\tpcap_file\tbssid_count\tbeacon_count\terror\n' > "$MANIFEST"
-    printf 'band\tfrequency_mhz\tchannel\tbssid\tssid\tbeacons\tbeacon_interval_tu\trssi_min_dbm\trssi_mean_dbm\trssi_max_dbm\tfirst_seen\tlast_seen\tbeacon_reception_ratio\n' > "$AGG"
+    printf '%s\n' "$MANIFEST_HEADER" > "$MANIFEST"
+    printf '%s\n' "$AGG_HEADER" > "$AGG"
     echo "SKIP: receiver absent - interface $IFACE not present; no frequencies attempted"
     write_instrument_json "skipped_no_interface" "ip link show $IFACE failed at run start"
     echo "SKIP: skip record written to $OUTDIR (run_status=skipped_no_interface)"
@@ -464,8 +511,8 @@ DISABLED="$(awk -F'\t' '$4 == "disabled"' "$FREQ_TABLE" | wc -l | tr -d ' ')"
 echo "Frequency discovery: $(wc -l < "$FREQ_TABLE" | tr -d ' ') listed, ${PERMITTED} permitted, ${DISABLED} disabled"
 echo
 
-printf 'band\tfrequency_mhz\tchannel\tregulatory_state\tsample_status\tdwell_seconds\tpcap_file\tbssid_count\tbeacon_count\terror\n' > "$MANIFEST"
-printf 'band\tfrequency_mhz\tchannel\tbssid\tssid\tbeacons\tbeacon_interval_tu\trssi_min_dbm\trssi_mean_dbm\trssi_max_dbm\tfirst_seen\tlast_seen\tbeacon_reception_ratio\n' > "$AGG"
+printf '%s\n' "$MANIFEST_HEADER" > "$MANIFEST"
+printf '%s\n' "$AGG_HEADER" > "$AGG"
 
 # Append one manifest row. All fields must be tab-safe single lines.
 manifest_row() {

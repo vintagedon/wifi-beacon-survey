@@ -4,7 +4,7 @@ title: "Operations Runbook"
 description: "Known failure modes of the receiver on ml01 and how to diagnose them"
 author: "VintageDon (https://github.com/vintagedon/)"
 date: "2026-08-27"
-version: "1.0"
+version: "1.1"
 status: "Active"
 tags:
   - type: runbook
@@ -41,7 +41,7 @@ iw dev wlx00c0cab63b82 info       # type, should be monitor or managed
 
 ## 2. Failure: Enumeration Fails on One USB Controller
 
-**Observed**: 2026-08-16, again 2026-08-25 through 2026-08-27 (ten days of lost collection).
+**Observed**: 2026-08-16, again 2026-08-25 through 2026-08-27. This enumeration failure accounts for only the last two to three days of the outage. The full ten-day gap from 2026-08-17 was the hourly schedule never having been armed (review finding R1); the receiver was healthy until the 08-25 reboot, which is when this fault surfaced.
 
 **Signature**:
 
