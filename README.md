@@ -3,8 +3,8 @@
 title: "Wi-Fi Beacon Survey"
 description: "A fixed passive 802.11 receiver producing longitudinal analysis-ready datasets of access point beacon telemetry"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-17"
-version: "1.1"
+date: "2026-08-27"
+version: "1.3"
 status: "Discovery prototype"
 tags:
   - type: project-root
@@ -14,6 +14,8 @@ related_documents:
   - "[Agent Instructions](AGENTS.md)"
   - "[Documentation Standards](docs/documentation-standards/README.md)"
   - "[Scripts](scripts/README.md)"
+  - "[Instrument Changelog](docs/instrument-changelog.md)"
+  - "[Operations Runbook](docs/operations-runbook.md)"
 ---
 -->
 
@@ -89,7 +91,7 @@ AWUS036AXM (monitor, passive)
 | Layer 1 | Reception ratio, capability decode, security normalisation, identity grouping | Yes, from Layer 0 |
 | Release | Published tables with release-stage content decisions applied | Yes, from Layer 1 |
 
-Scheduled execution is planned as bounded Semaphore jobs rather than a long-lived daemon. Scheduling begins only after the production collection contract defines an atomic completion marker and makes partial runs unambiguous.
+Scheduled execution runs as bounded hourly Semaphore jobs into the pilot path. The production collection contract (atomic completion metadata, per-artifact provenance) is still unwritten, which is what `pilot/` denotes: a statement about metadata guarantees, not about data quality. The hourly series starts at `20260827-090003`; the two earlier runs in `pilot/` (`054734`, `060013`) are post-IC-001 commissioning sweeps that predate `instrument.json` and should be excluded by longitudinal consumers.
 
 ---
 
@@ -98,13 +100,17 @@ Scheduled execution is planned as bounded Semaphore jobs rather than a long-live
 | Component | Detail |
 |-----------|--------|
 | Adapter | Alfa AWUS036AXM (MediaTek MT7921AU, `mt7921u` driver in the `mt76` tree) |
+| Antenna | Eightwood 9 dBi tri-band, rated 2400-2500 / 5150-5850 / 5900-7125 MHz, on a 6 ft cable. Fitted 2026-08-27, replacing the stock stubs |
 | Chains | Single antenna path; the driver reports two receive chains |
 | Host | ML01, Linux, `iw` for radio control, libpcap for capture |
-| Regulatory | US. All 6 GHz frequencies enumerate as `no-ir` |
+| USB | Must occupy a Bus 001 port. The host's other USB controller fails to enumerate this adapter, and nothing enforces the placement |
+| Regulatory | US. All 6 GHz frequencies enumerate as `no-ir`. The domain reverts to world across a driver reload and is currently restored by hand |
 | Sweep | 101 frequencies derived from live kernel regulatory state, 98 attempted, 10 s dwell, roughly 996 s per full sweep |
 | Data path | `/opt/agents/repos/storage-mounted/wifi-beacon-survey`, outside the Git repository |
 
-Capture volume is approximately 1.16 MB per sweep, which is 425 MB per year at daily cadence and 10 GB per year at hourly.
+Capture volume is approximately 2.1 to 2.7 MB per sweep (measured across the first hourly series; larger since IC-001 raised BSSID counts), which is roughly 0.9 GB per year at daily cadence and 22 GB per year at hourly.
+
+The antenna and its position changed together on 2026-08-27, which moved both the sensitivity floor and the near-field response. Capture before and after that date is not directly comparable, and all pre-change capture now lives behind the `archive/pre-IC-001/` epoch boundary at the data root. See [IC-001](docs/instrument-changelog.md) for the measured effect, and the [operations runbook](docs/operations-runbook.md) for the USB and regulatory failure modes above.
 
 ---
 
@@ -119,6 +125,10 @@ These are measured properties of this receiver, established against retained cap
 | PHY rate fields | Beacons transmit at legacy basic rates, so Radiotap MCS and VHT fields are absent and cannot classify AP capability |
 | Reception ratio ceiling | 0.922 against a theoretical maximum, with the shortfall not yet attributed to a specific cause |
 | Detection completeness | Four access points advertised by Reduced Neighbor Report were not received in the sweep that recorded the advertisement. Sweeps are sequential, not simultaneous, so this is not yet a measured miss rate |
+| Sensitivity floor | Weakest mean received signal is -95.0 dBm since IC-001, against -92.3 dBm before it |
+| Near-field response | IC-001 cost 6 to 11 dB on close access points while adding far-field reach. The strongest signal now observed is roughly -34 dBm, where it was roughly -25 dBm before |
+| Run-to-run churn | Two BSSIDs lost and five gained across two sweeps 29 hours apart with no configuration change, all below -88 dBm. This is the floor any claimed change must clear |
+| 6 GHz reception | Zero beacons across all 59 frequencies in every tri-band sweep to date, including after IC-001 raised the floor to -95 dBm on an antenna rated to 7125 MHz. A measured absence, not yet distinguished from a receiver limitation |
 
 The Reduced Neighbor Report deserves particular note. Beacons on one band advertise co-located radios on another, which gives a single fixed station an external reference for access points that should be receivable. That is the only available path to characterising the instrument's own false-negative behaviour.
 
@@ -169,7 +179,7 @@ Capture data is deliberately absent from Git. It lives under the external data r
 
 **Out of scope permanently.** Channel State Information sensing, which this hardware does not expose. Multi-receiver or time-synchronised capture. Mobility, trajectory, presence, and occupancy inference, none of which a single fixed station can support. Wardriving and BSSID-to-coordinate geolocation. Active scanning and injection. Intrusion detection and rogue access point identification.
 
-**Deferred.** The production collection contract, Semaphore scheduling, PostgreSQL projection, release packaging and its content decisions, ARD Layer 1 materialisation, and the nl80211 survey surface. Dataset release requires its own scrub and re-identification review.
+**Deferred.** The production collection contract, PostgreSQL projection, release packaging and its content decisions, ARD Layer 1 materialisation, and the nl80211 survey surface. Dataset release requires its own scrub and re-identification review.
 
 ---
 
@@ -188,4 +198,4 @@ Capture data is deliberately absent from Git. It lives under the external data r
 
 ---
 
-Last Updated: August 17, 2026 | Status: Discovery prototype
+Last Updated: August 27, 2026 | Status: Discovery prototype
