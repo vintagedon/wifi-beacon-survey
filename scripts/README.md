@@ -25,6 +25,11 @@ scripts/
 ├── wifi-beacon-sample.sh   # The collector: tri-band frequency-driven sweep
 ├── analyze-sweep.py        # Profile one sweep: coverage, calibration, identity
 ├── probe-surfaces.py       # Discover what a capture actually contains
+├── pilot_contract.py       # Single-source pilot series contract (imported)
+├── pilot_enrich.py         # Per-run PCAP enrichment to versioned Parquet
+├── pilot_database.py       # DuckDB projection rebuild from Parquet + SQL
+├── pilot_report.py         # Deterministic Markdown briefing renderer
+├── pilot-update.py         # Stable CLI entrypoint for the pilot pipeline
 └── README.md               # This file
 ```
 
@@ -37,6 +42,11 @@ scripts/
 | [wifi-beacon-sample.sh](wifi-beacon-sample.sh) | Derives permitted frequencies from live kernel regulatory state, tunes each in turn with `iw`, captures beacons with tcpdump, and writes per-frequency PCAP plus a sweep manifest. Every run also writes `instrument.json` (run status, regulatory domain, USB location, capture parameters); an absent interface produces a skip record and exits 0 | ⚠️ Discovery prototype; production completion contract pending |
 | [analyze-sweep.py](analyze-sweep.py) | Profiles a completed sweep: band coverage, positive-control check, reception-ratio bounds, radio-family resolution, SSID and RF profiling, quality flags | ✅ Active |
 | [probe-surfaces.py](probe-surfaces.py) | Seven read-only passes over a sweep: dissector field availability, Radiotap population, truncation check, Information Element census, Reduced Neighbor Report extraction with detection-completeness comparison, BSS Load, advertised identity structure | ✅ Active |
+| [pilot_contract.py](pilot_contract.py) | Machine-enforced form of the [pilot analysis contract](../docs/pilot-analysis-contract.md): series eligibility, attempt states, expected hourly slots, derived table schemas. Every producer and consumer imports from here | ✅ Active |
+| [pilot_enrich.py](pilot_enrich.py) | Replays one pilot run into versioned per-run Parquet (run, frequencies, observations, IE capabilities, RNR, BSS Load, field resolution) with hashed source identity and an atomic derivation manifest. Read-only against evidence | ✅ Active |
+| [pilot_database.py](pilot_database.py) | Rebuilds `derived/pilot.duckdb` from the versioned Parquet layer, verified manifests, and [`sql/pilot/pilot_views.sql`](../sql/pilot/pilot_views.sql) | ✅ Active |
+| [pilot_report.py](pilot_report.py) | Renders the deterministic technical briefing to `reports/pilot-latest.md` from fixed templates and query results; no LLM, no wall-clock prose | ✅ Active |
+| [pilot-update.py](pilot-update.py) | The stable pipeline entrypoint: enrich (idempotent, incremental) -> database -> report, with overridable roots for tests | ✅ Active |
 
 ---
 
@@ -56,6 +66,8 @@ The default output base is `sweeps/`. Scheduled discovery-phase runs override it
 python3 analyze-sweep.py /opt/agents/repos/storage-mounted/wifi-beacon-survey/pilot/<sweep-id>
 python3 probe-surfaces.py /opt/agents/repos/storage-mounted/wifi-beacon-survey/pilot/<sweep-id> --tsv ./out
 python3 probe-surfaces.py <sweep-dir> --only radiotap
+python3 pilot-update.py                # enrich + database + report, production paths
+python3 pilot-update.py --stage enrich --pilot-root /tmp/kilo/pilot
 ```
 
 ---

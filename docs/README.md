@@ -37,7 +37,12 @@ docs/
 │   ├── script-header-powershell.md
 │   └── README.md
 ├── gdr-prompt-01-mt7921au-data-surfaces.md   # Research prompt: unused hardware data surfaces
+├── pilot-analysis-contract.md                # Provisional derived-data contract for the hourly pilot
 ├── 2026-08-27-hourly-collection-review.md    # Operator review surface: scheduling, archive, skip records
+├── 2026-08-28-pilot-technical-briefing-review.md  # Operator review surface: enrichment and briefing findings PBR-01..08''',
+'''├── gdr-prompt-01-mt7921au-data-surfaces.md   # Research prompt: unused hardware data surfaces
+├── pilot-analysis-contract.md                # Provisional derived-data contract for the hourly pilot
+├── 2026-08-27-hourly-collection-review.md    # Operator review surface: scheduling, archive, skip records''')
 ├── instrument-changelog.md                   # Dated record of capture-changing modifications
 ├── operations-runbook.md                     # Known receiver failure modes and triage
 └── README.md                                 # This file
@@ -50,6 +55,8 @@ docs/
 | File | Description | Status |
 |------|-------------|--------|
 | [gdr-prompt-01-mt7921au-data-surfaces.md](gdr-prompt-01-mt7921au-data-surfaces.md) | Bounded research prompt asking what the MT7921AU and the 802.11 beacon body expose that the collector currently discards. Run across three models; findings drove the current parser scope | ✅ Active |
+| [pilot-analysis-contract.md](pilot-analysis-contract.md) | Provisional, rebuildable derived-data contract for the hourly pilot: series eligibility, attempt states, versioned per-run artifacts, and the DuckDB/briefing surfaces. Machine-enforced by `scripts/pilot_contract.py` | ✅ Active |
+| [2026-08-28-pilot-technical-briefing-review.md](2026-08-28-pilot-technical-briefing-review.md) | Review surface for the pilot enrichment and briefing unit: live-evidence findings PBR-01 through PBR-08 on series enforcement, reconciliation, field resolution, grains, 6 GHz claims, scheduled integration, briefing usefulness, and PostgreSQL deferral. Each finding ends in a closed question | 🔍 Under review |
 | [2026-08-27-hourly-collection-review.md](2026-08-27-hourly-collection-review.md) | Review surface for the hourly-collection and epoch-archive spec: schedule-fault determination, archive layout, skip-record shape, cadence, output format, unenforced dependencies. Each finding ends in a closed question | 🔍 Under review |
 | [instrument-changelog.md](instrument-changelog.md) | Dated register of changes that alter what the receiver can hear, with before and after evidence. Any release spanning a change identifier must expose it | ✅ Active |
 | [operations-runbook.md](operations-runbook.md) | Observed failure modes of the receiver on ml01: USB controller enumeration, `btusb` contention on the combo device, and regulatory domain reversion | ✅ Active |

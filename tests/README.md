@@ -17,9 +17,12 @@ related_documents:
 
 # Tests
 
-Focused regression tests for the collector's embedded PCAP parser and the two
-Python analysis tools. The suite uses the Python standard library test runner;
-test_analyze_sweep.py additionally requires the analysis dependencies.
+Focused regression tests for the collector's embedded PCAP parser, the two
+Python analysis tools, and the pilot derived pipeline (contract, enrichment,
+DuckDB surface, briefing). The suite uses the Python standard library test
+runner; the analysis and pipeline tests additionally require the shared-venv
+dependencies and tshark. `_synthetic_pcap.py` builds tiny synthetic beacon
+captures with real IE bytes so the pipeline tests run without live data.
 
 Run from the repository root:
 

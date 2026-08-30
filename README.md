@@ -91,7 +91,7 @@ AWUS036AXM (monitor, passive)
 | Layer 1 | Reception ratio, capability decode, security normalisation, identity grouping | Yes, from Layer 0 |
 | Release | Published tables with release-stage content decisions applied | Yes, from Layer 1 |
 
-Scheduled execution runs as bounded hourly Semaphore jobs into the pilot path. The production collection contract (atomic completion metadata, per-artifact provenance) is still unwritten, which is what `pilot/` denotes: a statement about metadata guarantees, not about data quality. The hourly series starts at `20260827-090003`; the two earlier runs in `pilot/` (`054734`, `060013`) are post-IC-001 commissioning sweeps that predate `instrument.json` and should be excluded by longitudinal consumers.
+Scheduled execution runs as bounded hourly Semaphore jobs into the pilot path, and each attempt is followed by the pilot analysis pipeline (`scripts/pilot-update.py`), which maintains a versioned Parquet layer, a DuckDB projection, and a Markdown briefing under the data root. The provisional derived contract is documented in [docs/pilot-analysis-contract.md](docs/pilot-analysis-contract.md). The production collection contract (atomic completion metadata, per-artifact provenance) is still unwritten, which is what `pilot/` denotes: a statement about metadata guarantees, not about data quality. The hourly series starts at `20260827-090003`; the two earlier runs in `pilot/` (`054734`, `060013`) are post-IC-001 commissioning sweeps that predate `instrument.json` and are excluded from every pilot trend.
 
 ---
 
@@ -168,6 +168,7 @@ Capture data is deliberately absent from Git. It lives under the external data r
 | [wifi-beacon-sample.sh](scripts/wifi-beacon-sample.sh) | The collector. Derives frequencies from kernel regulatory state, tunes each in turn, captures beacons, writes PCAP and manifest |
 | [analyze-sweep.py](scripts/analyze-sweep.py) | Profiles a single sweep: coverage, positive controls, reception-ratio bounds, identity grouping, quality flags |
 | [probe-surfaces.py](scripts/probe-surfaces.py) | Discovers what a capture actually contains: dissector field availability, Radiotap population, Information Element census, RNR and BSS Load extraction |
+| [pilot-update.py](scripts/pilot-update.py) | Updates the pilot derived layer after every collection attempt: versioned per-run Parquet, the DuckDB projection, and `reports/pilot-latest.md` |
 
 `probe-surfaces.py` resolves dissector field names against the installed Wireshark build before using them rather than assuming, because published references for the Reduced Neighbor Report namespace disagree with each other and with reality.
 
