@@ -3,8 +3,8 @@
 title: "Internal Files"
 description: "Reviewed context units safe to track with the source repository"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-17"
-version: "1.1"
+date: "2026-09-03"
+version: "1.2"
 status: "Active"
 tags:
   - type: directory-readme
@@ -30,6 +30,7 @@ README is not exempt.
 ```
 internal-files/
 ├── 2026-08-17-wifi-beacon-survey-one-pager.md   # Repository-safe context
+├── 2026-09-03-documentation-todo.md             # Documentation gap inventory
 └── README.md                                    # This file
 ```
 
@@ -40,10 +41,11 @@ internal-files/
 | File | Description | Status |
 |------|-------------|--------|
 | [2026-08-17-wifi-beacon-survey-one-pager.md](2026-08-17-wifi-beacon-survey-one-pager.md) | Repository-safe snapshot of the vision, architecture, validated prototype state, inference limits, and next milestone | ✅ Active |
+| [2026-09-03-documentation-todo.md](2026-09-03-documentation-todo.md) | Inventory of public-facing and consumer-facing documentation gaps, their dependencies, and intended order | ✅ Active |
 
 ---
 
-## 4. Related
+## 3. Related
 
 | Document | Relationship |
 |----------|--------------|

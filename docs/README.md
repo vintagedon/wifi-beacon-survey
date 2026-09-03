@@ -3,8 +3,8 @@
 title: "Documentation"
 description: "Project documentation, standards, and research inputs"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-27"
-version: "2.1"
+date: "2026-09-03"
+version: "2.2"
 status: "Active"
 tags:
   - type: directory-readme
@@ -37,12 +37,10 @@ docs/
 │   ├── script-header-powershell.md
 │   └── README.md
 ├── gdr-prompt-01-mt7921au-data-surfaces.md   # Research prompt: unused hardware data surfaces
+├── gdr-prompt-02-ard-materialization.md      # Research prompt: ARD materialization strategy
 ├── pilot-analysis-contract.md                # Provisional derived-data contract for the hourly pilot
 ├── 2026-08-27-hourly-collection-review.md    # Operator review surface: scheduling, archive, skip records
-├── 2026-08-28-pilot-technical-briefing-review.md  # Operator review surface: enrichment and briefing findings PBR-01..08''',
-'''├── gdr-prompt-01-mt7921au-data-surfaces.md   # Research prompt: unused hardware data surfaces
-├── pilot-analysis-contract.md                # Provisional derived-data contract for the hourly pilot
-├── 2026-08-27-hourly-collection-review.md    # Operator review surface: scheduling, archive, skip records''')
+├── 2026-08-28-pilot-technical-briefing-review.md  # Operator review surface: enrichment and briefing findings PBR-01..08
 ├── instrument-changelog.md                   # Dated record of capture-changing modifications
 ├── operations-runbook.md                     # Known receiver failure modes and triage
 └── README.md                                 # This file
@@ -55,6 +53,7 @@ docs/
 | File | Description | Status |
 |------|-------------|--------|
 | [gdr-prompt-01-mt7921au-data-surfaces.md](gdr-prompt-01-mt7921au-data-surfaces.md) | Bounded research prompt asking what the MT7921AU and the 802.11 beacon body expose that the collector currently discards. Run across three models; findings drove the current parser scope | ✅ Active |
+| [gdr-prompt-02-ard-materialization.md](gdr-prompt-02-ard-materialization.md) | Research prompt for choosing the analysis-ready data materialization strategy after the pilot evidence is reviewed | ✅ Active |
 | [pilot-analysis-contract.md](pilot-analysis-contract.md) | Provisional, rebuildable derived-data contract for the hourly pilot: series eligibility, attempt states, versioned per-run artifacts, and the DuckDB/briefing surfaces. Machine-enforced by `scripts/pilot_contract.py` | ✅ Active |
 | [2026-08-28-pilot-technical-briefing-review.md](2026-08-28-pilot-technical-briefing-review.md) | Review surface for the pilot enrichment and briefing unit: live-evidence findings PBR-01 through PBR-08 on series enforcement, reconciliation, field resolution, grains, 6 GHz claims, scheduled integration, briefing usefulness, and PostgreSQL deferral. Each finding ends in a closed question | 🔍 Under review |
 | [2026-08-27-hourly-collection-review.md](2026-08-27-hourly-collection-review.md) | Review surface for the hourly-collection and epoch-archive spec: schedule-fault determination, archive layout, skip-record shape, cadence, output format, unenforced dependencies. Each finding ends in a closed question | 🔍 Under review |

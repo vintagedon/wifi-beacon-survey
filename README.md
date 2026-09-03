@@ -3,8 +3,8 @@
 title: "Wi-Fi Beacon Survey"
 description: "A fixed passive 802.11 receiver producing longitudinal analysis-ready datasets of access point beacon telemetry"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-27"
-version: "1.3"
+date: "2026-09-03"
+version: "1.4"
 status: "Discovery prototype"
 tags:
   - type: project-root
@@ -144,6 +144,7 @@ wifi-beacon-survey/
 ├── internal-files/               # Reviewed repository-safe context
 ├── recycle-bin/                  # Retired files, never deleted
 ├── scripts/                      # Collector and analysis tooling
+├── sql/                          # Rebuildable DuckDB analytical view definitions
 ├── tests/                        # Focused regression tests
 ├── .gitignore                    # Evidence and generated-output guard
 ├── AGENTS.md                     # Agent context and constraints
@@ -199,4 +200,4 @@ Capture data is deliberately absent from Git. It lives under the external data r
 
 ---
 
-Last Updated: August 27, 2026 | Status: Discovery prototype
+Last Updated: September 3, 2026 | Status: Discovery prototype
