@@ -233,6 +233,14 @@ def _render(data: dict, now: datetime | None) -> str:
     cutoff = max(cutoff_sources) if cutoff_sources else "no source events"
     latest_input = data["health_rows"][-1][0] if data["health_rows"] else "n/a"
     last_success = latest_hourly[0] if latest_hourly else "none yet"
+    report_dir = data["report_path"].parent
+    docs_dir = _SCRIPTS_DIR.parent / "docs"
+    contract_link = Path(os.path.relpath(
+        docs_dir / "pilot-analysis-contract.md", report_dir
+    )).as_posix()
+    collection_review_link = Path(os.path.relpath(
+        docs_dir / "2026-08-27-hourly-collection-review.md", report_dir
+    )).as_posix()
 
     lines: list[str] = []
     add = lines.append
@@ -252,8 +260,8 @@ def _render(data: dict, now: datetime | None) -> str:
     add("  - domain: dataset")
     add("  - tech: [python, duckdb, markdown]")
     add("related_documents:")
-    add('  - "[Pilot Analysis Contract](pilot-analysis-contract.md)"')
-    add('  - "[Hourly Collection Review](2026-08-27-hourly-collection-review.md)"')
+    add(f'  - "[Pilot Analysis Contract]({contract_link})"')
+    add(f'  - "[Hourly Collection Review]({collection_review_link})"')
     add("---")
     add("-->")
     add("")
@@ -407,11 +415,10 @@ def _render(data: dict, now: datetime | None) -> str:
         add(f"- 6 GHz frequencies sampled-empty: {sampled_empty or 0} of "
             f"{manifest_freqs or 0} manifest rows -- recorded negative"
             " observations, not gaps")
-        add(f"- RNR-advertised 6 GHz neighbors (single-occurrence rows only):"
-            f" {advertised or 0}")
+        add(f"- RNR-advertised 6 GHz neighbors: {advertised or 0} "
+            f"(lower bound; excludes {ambiguous or 0} structurally "
+            "ambiguous RNR frames)")
         add(f"- Advertised 6 GHz links flagged disabled: {disabled or 0}")
-        add(f"- Structurally ambiguous RNR frames: {ambiguous or 0} "
-            "(never positionally paired)")
         add(f"- Unresolved 6 GHz operating classes: {unresolved_oc or 0}")
         add(f"- Advertised-but-not-observed (nonconcurrent): {not_observed or 0}")
         add("")
@@ -442,7 +449,8 @@ def _render(data: dict, now: datetime | None) -> str:
             " Station")
         add(f"count ranged {stn_min}-{stn_max}; channel utilization ranged")
         add(f"{util_min}-{util_max} of 255 "
-            f"({100 * (util_min or 0) // 255}-{100 * (util_max or 0) // 255}%).")
+            f"({util_min}/255 = {100 * (util_min or 0) / 255:.1f}%; "
+            f"{util_max}/255 = {100 * (util_max or 0) / 255:.1f}%).")
         add("")
         add("These values are **advertised by the AP** -- its own association")
         add("count and its own sensed medium busy fraction. They are not")

@@ -122,6 +122,17 @@ class SectionAndDeterminismTests(ReportTestBase):
         self.assertIn("2026-08-27T13:00:03Z", text)
         self.assertNotIn(str(self.contract.datetime.now().year + 1), text)
 
+    def test_frontmatter_related_documents_resolve_from_report_directory(self):
+        _, report = self.full_update()
+        frontmatter = self.text(report).split("---", 2)[1]
+        links = re.findall(r'\[[^]]+\]\(([^)]+)\)', frontmatter)
+        self.assertEqual(len(links), 2)
+        for link in links:
+            self.assertTrue(
+                (report.parent / link).resolve().is_file(),
+                f"report link does not resolve: {link}",
+            )
+
 
 class TruthfulnessTests(ReportTestBase):
 
@@ -174,6 +185,42 @@ class TruthfulnessTests(ReportTestBase):
         for forbidden in ("sensitivity of", "dwell is too short",
                           "receiver blindness", "miss rate of"):
             self.assertNotIn(forbidden, text)
+
+    def test_6ghz_neighbor_floor_and_excluded_ambiguity_share_one_view_row(self):
+        self.full_update()
+        db = self.contract.derived_runs_root(
+            self.derived_root).parents[2] / "pilot.duckdb"
+        con = duckdb.connect(str(db))
+        try:
+            con.execute("""
+                CREATE OR REPLACE VIEW pilot_6ghz_evidence AS SELECT
+                    '20260827-140002'::VARCHAR AS run_id,
+                    '2026-08-27T14:00:03Z'::VARCHAR AS started_utc,
+                    0::BIGINT AS direct_bssids,
+                    0::HUGEINT AS direct_beacons,
+                    0::BIGINT AS sampled_frequencies,
+                    3::BIGINT AS sampled_empty_frequencies,
+                    3::BIGINT AS manifest_frequencies,
+                    17::BIGINT AS advertised_6ghz_neighbors,
+                    2::BIGINT AS advertised_6ghz_disabled_links,
+                    0::BIGINT AS unresolved_operating_classes,
+                    23::BIGINT AS ambiguous_rnr_rows,
+                    5::BIGINT AS advertised_not_observed_nonconcurrent
+            """)
+        finally:
+            con.close()
+
+        report = self.updater.report_stage(
+            self.pilot_root, self.derived_root, self.reports_dir, self.now
+        )
+        section = self.text(report).split(
+            "## 6. RNR and 6 GHz evidence", 1
+        )[1].split("## 7. BSS Load", 1)[0]
+        self.assertIn(
+            "RNR-advertised 6 GHz neighbors: 17 (lower bound; excludes 23 "
+            "structurally ambiguous RNR frames)",
+            section,
+        )
 
     def test_every_percentage_carries_numerator_and_denominator(self):
         _, report = self.full_update()
@@ -260,6 +307,23 @@ class ValueReconciliationTests(ReportTestBase):
                             f"{empty} | {skips} | {errors} | {bssids} | "
                             f"{beacons} |")
             self.assertIn(expected_row, coverage)
+
+    def test_bss_load_utilization_uses_rounded_underlying_ratio(self):
+        _, report = self.full_update()
+        db = self.contract.derived_runs_root(
+            self.derived_root).parents[2] / "pilot.duckdb"
+        con = duckdb.connect(str(db), read_only=True)
+        try:
+            util_min, util_max = con.execute(
+                "SELECT MIN(utilization), MAX(utilization) FROM pilot_bss_load"
+            ).fetchone()
+        finally:
+            con.close()
+        expected = (
+            f"{util_min}/255 = {100 * util_min / 255:.1f}%; "
+            f"{util_max}/255 = {100 * util_max / 255:.1f}%"
+        )
+        self.assertIn(expected, self.text(report))
 
 
 if __name__ == "__main__":
