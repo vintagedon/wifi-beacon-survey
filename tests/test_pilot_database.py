@@ -180,6 +180,140 @@ class ReconciliationTests(DatabaseTestBase):
                 self.pilot_root, self.derived_root, now=self.now)
 
 
+class DegradedPathTests(DatabaseTestBase):
+    """The projection remains queryable when no advanced artifact contributes."""
+
+    def _mark_every_manifest_partial(self):
+        runs_root = self.contract.derived_runs_root(self.derived_root)
+        for run_dir in runs_root.iterdir():
+            manifest_path = run_dir / self.contract.MANIFEST_NAME
+            if not manifest_path.is_file():
+                continue
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["status"] = "partial"
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+    @staticmethod
+    def _query_path(path, sql):
+        con = duckdb.connect(str(path), read_only=True)
+        try:
+            return con.execute(sql).fetchall()
+        finally:
+            con.close()
+
+    def test_all_partial_manifests_keep_core_views_and_typed_empty_advanced(self):
+        expected_health = self.q(
+            "SELECT run_id, state, eligible, in_trend, reason, started_utc, "
+            "input_complete FROM pilot_run_health ORDER BY ALL"
+        )
+        expected_hourly = self.q(
+            "SELECT * FROM pilot_hourly_metrics ORDER BY ALL"
+        )
+        self._mark_every_manifest_partial()
+
+        partial_db = self.base / "all-partial.duckdb"
+        self.database.build_database(
+            self.pilot_root,
+            self.derived_root,
+            target=partial_db,
+            now=self.now,
+        )
+
+        present = {
+            row[0]
+            for row in self._query_path(
+                partial_db, "SELECT view_name FROM duckdb_views()"
+            )
+        }
+        self.assertEqual(present.intersection(self.contract.VIEW_NAMES),
+                         set(self.contract.VIEW_NAMES))
+        self.assertEqual(
+            self._query_path(
+                partial_db,
+                "SELECT run_id, state, eligible, in_trend, reason, "
+                "started_utc, input_complete FROM pilot_run_health "
+                "ORDER BY ALL",
+            ),
+            expected_health,
+        )
+        self.assertEqual(
+            self._query_path(
+                partial_db, "SELECT * FROM pilot_hourly_metrics ORDER BY ALL"
+            ),
+            expected_hourly,
+        )
+
+        arrow_to_duckdb = {
+            "string": "VARCHAR",
+            "int64": "BIGINT",
+            "double": "DOUBLE",
+            "bool": "BOOLEAN",
+        }
+        for table_name in (
+            "ie_capabilities", "rnr", "bss_load", "field_resolution"
+        ):
+            self.assertEqual(
+                self._query_path(
+                    partial_db, f"SELECT COUNT(*) FROM stg_{table_name}"
+                ),
+                [(0,)],
+            )
+            schema = self.database.pilot_enrich.table_schema(table_name)
+            expected_columns = [
+                (field.name, arrow_to_duckdb[str(field.type)])
+                for field in schema
+            ]
+            actual_columns = self._query_path(
+                partial_db,
+                "SELECT column_name, data_type FROM duckdb_columns() "
+                f"WHERE table_name = 'stg_{table_name}' ORDER BY column_index",
+            )
+            self.assertEqual(actual_columns, expected_columns)
+
+    def test_empty_pilot_and_derived_trees_build_twelve_empty_views(self):
+        empty_pilot = self.base / "empty-pilot"
+        empty_pilot.mkdir()
+        empty_derived = self.base / "empty-derived"
+        empty_derived.mkdir()
+        empty_db = self.base / "empty.duckdb"
+
+        self.database.build_database(
+            empty_pilot,
+            empty_derived,
+            target=empty_db,
+            now=self.contract.datetime(2026, 8, 27, 8, 30),
+        )
+
+        for view_name in self.contract.VIEW_NAMES:
+            self.assertEqual(
+                self._query_path(empty_db, f"SELECT COUNT(*) FROM {view_name}"),
+                [(0,)],
+                view_name,
+            )
+
+    def test_missing_declared_type_fails_empty_path_loudly(self):
+        self._mark_every_manifest_partial()
+        type_columns = self.database.pilot_enrich._STRING_COLUMNS[
+            "ie_capabilities"
+        ]
+        type_columns.remove("elements")
+        try:
+            with self.assertRaises(
+                self.database.pilot_enrich.ExtractionError
+            ):
+                self.database.build_database(
+                    self.pilot_root,
+                    self.derived_root,
+                    target=self.base / "missing-type.duckdb",
+                    now=self.now,
+                )
+        finally:
+            type_columns.add("elements")
+
+
 class MutationCheckTests(DatabaseTestBase):
 
     def test_duplicated_parquet_observation_fails_reconciliation(self):

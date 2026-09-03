@@ -136,11 +136,18 @@ def verify_output(out_dir: Path, manifest: dict, name: str) -> list[tuple]:
 # =============================================================================
 
 
-def _empty_like(con: duckdb.DuckDBPyConnection, name: str,
-                 sample: Path | None, table: str) -> None:
+def _empty_like(
+    con: duckdb.DuckDBPyConnection, name: str, table: str
+) -> None:
     """Create an empty staging table with the contract's declared schema."""
-    columns = list(pilot.TABLES[table])
-    con.execute(f"CREATE OR REPLACE TABLE stg_{name} ({', '.join(columns)})")
+    empty = pa.Table.from_pylist([], schema=pilot_enrich.table_schema(table))
+    con.register("stg_empty", empty)
+    try:
+        con.execute(
+            f"CREATE OR REPLACE TABLE stg_{name} AS SELECT * FROM stg_empty"
+        )
+    finally:
+        con.unregister("stg_empty")
 
 
 def build_database(
@@ -213,7 +220,7 @@ def build_database(
                     "SELECT * FROM stg_incoming")
                 con.unregister("stg_incoming")
             else:
-                _empty_like(con, table_name, None, table_name)
+                _empty_like(con, table_name, table_name)
 
         # Health staging table from the contract projection.
         health_table = pa.table({
