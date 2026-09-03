@@ -222,8 +222,10 @@ GROUP BY c.run_id, h.started_utc;
 -- RNR-advertised 6 GHz neighbors (single-occurrence rows only -- repeated
 -- values are never paired positionally), disabled links, ambiguous rows,
 -- unresolved operating classes, and nonconcurrent advertised-but-not-
--- observed cases. A non-observation here is timing-aware evidence in a
--- sequential sweep, never a calibrated miss.
+-- observed cases. No positive 6 GHz control exists on this instrument, so
+-- the nonconcurrency reading is provisional pending the falsification test.
+-- A non-observation here is not evidence that the receiver is calibrated
+-- for 6 GHz.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE VIEW pilot_6ghz_evidence AS

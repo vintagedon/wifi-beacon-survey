@@ -3,8 +3,8 @@
 title: "Pilot Technical Briefing Review"
 description: "Operator approval surface for the pilot enrichment and briefing unit: live-evidence findings PBR-01 through PBR-08"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-28"
-version: "1.0"
+date: "2026-09-03"
+version: "1.1"
 status: "Under review"
 tags:
   - type: review
@@ -157,9 +157,9 @@ re-parsing? (yes/no)
 
 ## PBR-05: What the 6 GHz evidence supports
 
-**Statement.** Confirmed — the evidence supports "advertised, not directly
-observed, nonconcurrent" and nothing stronger; the briefing states exactly
-that.
+**Statement.** Provisional: the evidence records advertised 6 GHz neighbors
+and no direct observations, but it cannot distinguish sequential
+nonconcurrency from an instrument that does not receive 6 GHz.
 
 **Evidence.**
 
@@ -177,12 +177,16 @@ that.
   whose mutation would fail on a sensitivity/dwell conclusion).
 - No RNR-advertised 6 GHz link carried the disabled indication in live data
   (0); the capability is covered by fixture (`tests/_synthetic_pcap.py`).
+- No positive 6 GHz control exists on this instrument. The nonconcurrency
+  reading remains provisional until the falsification test produces a direct
+  6 GHz observation under known receivable conditions.
 
 **Class:** environmental observation.
 
 **Question PBR-05.** Do you accept "advertised 6 GHz neighbors exist; none
-were directly observed; nonconcurrent, not a calibrated miss" as the standing
-6 GHz claim for the pilot? (yes/no)
+were directly observed; the nonconcurrency reading remains provisional
+pending a positive-control falsification test" as the standing 6 GHz claim
+for the pilot? (yes/no)
 
 ---
 
