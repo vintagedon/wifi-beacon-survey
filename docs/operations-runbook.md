@@ -3,8 +3,8 @@
 title: "Operations Runbook"
 description: "Known failure modes of the receiver on ml01 and how to diagnose them"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-27"
-version: "1.1"
+date: "2026-09-09"
+version: "1.2"
 status: "Active"
 tags:
   - type: runbook
@@ -88,7 +88,9 @@ usb 1-6: device descriptor read/64, error -110
 
 `hci1` is the MediaTek's Bluetooth function, not the onboard Realtek radio at `0bda:0852`. Setup taking seconds rather than milliseconds indicates the device is struggling before HCI_Reset times out.
 
-**Current state**: on a Bus 001 port, `btusb` loads, `hci1` completes setup, and `mt7921u` binds normally. No blacklist is applied and none is required at that location.
+**Recurrence, 2026-09-07 to 2026-09-09**: the adapter's Bluetooth function wedged the USB core on ml01 twice. A probe stuck in uninterruptible sleep held the USB core and module locks, so `lsusb` stopped after its first line, a subsequent `modprobe` hung, and `reboot` never completed while the host still answered ping. Physically unplugging the adapter did not clear it; only a hard power cycle did. The receiver was absent for 41 consecutive hourly runs, `20260907-090003` through `20260909-010003`, each recorded as `skipped_no_interface`. Host-side diagnosis is in `/opt/agents/repos/work-logs/2026-09-09-infra-worklog-00-ml01-ups-swap-nut-telemetry-and-usb-bt-blacklist.md`.
+
+**Current state**: the Bluetooth function is blocked at the module layer. `/etc/modprobe.d/ml01-alfa-mt7921.conf` carries `blacklist btmtk` and `install btusb /bin/false`, and initramfs was rebuilt. `modprobe btusb` returns nonzero immediately instead of hanging, and `mt7921u` binds normally on a Bus 001 port.
 
 **If it recurs**:
 
@@ -98,14 +100,9 @@ sudo modprobe -r btusb
 ip link show wlx00c0cab63b82
 ```
 
-To persist, and only if it proves necessary:
+A plain `blacklist btusb` is not enough and was the form originally written here. A blacklist suppresses autoload by alias only, so an explicit `modprobe btusb` still loads the module, and that is precisely the command that wedges the host. `install btusb /bin/false` makes it fail with a nonzero return instead. Blocking `btusb` outright is device-agnostic and takes the onboard Realtek radio with it; ml01 has no Bluetooth requirement, so the blunt form is acceptable here. A udev rule unbinding `btusb` from `0e8d:7961` alone is the targeted alternative.
 
-```bash
-echo 'blacklist btusb' | sudo tee /etc/modprobe.d/blacklist-btusb.conf
-sudo update-initramfs -u
-```
-
-That is device-agnostic and disables the onboard Realtek radio as well. ml01 has no Bluetooth requirement, so the blunt form is acceptable here. A udev rule unbinding `btusb` from `0e8d:7961` alone is the targeted alternative.
+**Verification**: `btusb` absent from `lsmod`, and `modprobe btusb` returning nonzero. Do not expect `btmtk` to be absent, and do not read its presence as a failed fix. Module dependencies are inserted before the install command runs, so at boot udev pulls in `btmtk`, `btrtl`, `btintel`, and `btbcm`, then `/bin/false` stops `btusb` itself. `btmtk` sits resident at refcount 0 with nothing able to bind through it, and `blacklist btmtk` does not prevent this because a blacklist does not govern dependency insertion. Confirmed on ml01 across the 2026-09-09 boot: `journalctl -b | grep 'install command'` shows the block firing during udev enumeration.
 
 **Diagnostic caution**: absence of `Bluetooth:` lines in `dmesg` does not exonerate `btusb`. If the device never reaches address assignment, no interface driver binds and none logs anything. Compare across controllers before drawing a conclusion.
 
@@ -113,9 +110,11 @@ That is device-agnostic and disables the onboard Realtek radio as well. ml01 has
 
 ## 4. Failure: Regulatory Domain Reverts to World
 
-**Observed**: 2026-08-16 and again 2026-08-27, both times across a driver reload.
+**Observed**: 2026-08-16, 2026-08-27, and again 2026-09-05, each time across a driver reload. The 2026-09-05 occurrence went undetected for 53 consecutive runs and is recorded as [IC-002](instrument-changelog.md).
 
-**Signature**: `iw reg get` reports `country 00` behaviour. In the sweep manifest this appears as 2467, 2472, and 2484 MHz flagged `no-ir` rather than `disabled`, every 5 GHz frequency flagged `no-ir`, and 5845, 5865, and 5885 MHz flagged `disabled`.
+**Signature**: `iw reg get` reports `country 00` behaviour. In the sweep manifest this appears as 2467, 2472, and 2484 MHz flagged `no-ir` rather than `disabled`, every 5 GHz frequency flagged `no-ir`, 5845, 5865, and 5885 MHz flagged `disabled`, and all 59 6 GHz frequencies flagged `disabled` with `regulatory_skip` at dwell 0. In `instrument.json` it appears as `regulatory_domain: "00"`, which is the cheapest check and the one to automate.
+
+**Severity**: worse than the 2.4 GHz signature suggests. Country 00 exposes no 5925-7125 MHz block at all, so the entire 6 GHz band stops being enumerated rather than being swept and found empty. A run under world domain looks successful and produces no 6 GHz measurement whatsoever.
 
 **Effect on capture**: reception is unaffected, since no-IR restricts transmission only and this receiver never transmits. The effect is on the frequency set. The collector derives its sweep from live kernel regulatory state, so a domain change silently alters which frequencies are visited. Under world, 2467 MHz gets swept where US skips it.
 
@@ -126,7 +125,7 @@ sudo iw reg set US
 iw reg get
 ```
 
-**Persistence**: not yet solved. If `iw reg set` does not take, the MT7921 is running a self-managed regulatory domain and takes its country from firmware or a received country IE rather than from userspace, which changes whether the collection contract can pin the domain or only assert and record it.
+**Persistence**: not yet solved, but no longer an open question. `sudo iw reg set US` took on 2026-09-09 and `iw reg get` returns no `phy#` section, so this driver is not self-managing its domain and the collection contract can pin it rather than only asserting it. The intended pin is `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot. Not yet applied.
 
 **Design note**: the collector records per-frequency regulatory state in `frequencies.tsv`, so a domain change lands in the evidence rather than silently altering the series. That property should be stated in the collection contract rather than left implicit.
 
@@ -137,6 +136,8 @@ iw reg get
 Known and not yet addressed:
 
 - Nothing asserts which USB controller the adapter is on, so section 2 recurs silently.
-- The regulatory domain is set by hand after any driver reload.
+- The regulatory domain is set by hand after any driver reload. The module-layer pin in section 4 is known to be workable and is not applied.
+- Nothing asserts the domain at run start, so a reverted domain produces a run that looks successful while silently sweeping a different frequency set. This is what made IC-002 cost 53 runs instead of one.
+- A scheduled run that never fires leaves no record at all, unlike an absent receiver. The 2026-09-09 02:00 slot is the example: the host was rebooting when the job triggered, so there is no run directory to distinguish it from a slot that was never scheduled.
 
-Recently addressed: an absent receiver now produces a skip record (`run_status=skipped_no_interface`) instead of nothing, so instrument downtime is recorded in the series rather than inferred from Semaphore history.
+Recently addressed: an absent receiver now produces a skip record (`run_status=skipped_no_interface`) instead of nothing, so instrument downtime is recorded in the series rather than inferred from Semaphore history. That path was exercised for 41 consecutive runs during the 2026-09-07 outage with no failures. The Bluetooth wedge in section 3 is now blocked at the module layer.

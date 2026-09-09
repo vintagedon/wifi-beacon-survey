@@ -3,8 +3,8 @@
 title: "Instrument Changelog"
 description: "Dated record of capture-changing modifications to the receiver, with before and after evidence"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-27"
-version: "1.0"
+date: "2026-09-09"
+version: "1.1"
 status: "Active"
 tags:
   - type: reference
@@ -30,6 +30,7 @@ Each entry carries a change identifier. Any dataset release spanning a change id
 | ID | Date | Change | Reversible | Effect |
 |----|------|--------|------------|--------|
 | IC-001 | 2026-08-27 | Antenna replacement and sensor repositioning | No, in practice | Large far-field sensitivity gain, 6 to 11 dB near-field loss |
+| IC-002 | 2026-09-05 | Regulatory domain reverted to world (00) for 53 consecutive runs | Yes, for capture after 2026-09-09 | 6 GHz not enumerated at all; 2.4 GHz channel 12-14 and upper 5 GHz coverage inverted |
 
 The reference sweep for the current instrument state is `pilot/20260827-060013`: full tri-band, 10 s dwell, US regulatory domain. It is the baseline any future change is measured against.
 
@@ -105,7 +106,48 @@ All capture predating this change is pilot data collected before the production 
 
 ---
 
-## 3. Recording a New Change
+## 3. IC-002: Regulatory Domain Reverted to World for 53 Runs
+
+**Date**: 2026-09-05, restored 2026-09-09
+**Type**: Capture-changing, recoverable for future capture but not for the affected window
+**Evidence**: `pilot/20260905-020003` (last US run) against `pilot/20260905-040003` (first world run), with manifest counts from `reports/pilot-latest.md`
+
+### What changed
+
+The global regulatory domain reverted from US to world (00) across a driver reload, as it had on 2026-08-16 and 2026-08-27. This time nothing caught it for 53 consecutive hourly runs.
+
+The boundary is exact. `20260905-020003` swept under US on `phy6`. The 03:00 slot recorded `skipped_no_interface`. `20260905-040003` swept under world on `phy1`, and the phy index change confirms the reload. World-domain capture continued through `20260907-080003`, the last run before the receiver went absent for 41 hours. `sudo iw reg set US` restored the domain at 02:43 on 2026-09-09 and it took, which establishes that this driver is not self-managing its domain.
+
+### Effect on the frequency set
+
+Under country 00 the kernel exposes no 5925-7125 MHz block at all. The 6 GHz band was not merely restricted, it did not exist to be tuned.
+
+| Frequencies | Under US | Under world |
+|-------------|----------|-------------|
+| 2.4 GHz channels 12, 13, 14 | `disabled`, `regulatory_skip`, dwell 0 | `no-ir`, sampled at 10 s |
+| 5 GHz UNII-2 | `radar`, sampled at 10 s | `no-IR,-radar-detection`, sampled at 10 s |
+| 5 GHz 5845, 5865, 5885 | `no-ir`, sampled at 10 s | `disabled`, `regulatory_skip`, dwell 0 |
+| 6 GHz, all 59 | `no-ir`, sampled at 10 s | `disabled`, `regulatory_skip`, dwell 0 |
+
+Manifest totals across the 258 trend runs confirm the split at 59 six-GHz frequencies per run either way: 12095 `sampled_empty` rows over 205 US runs, 3127 `regulatory_skip` rows over 53 world runs.
+
+Reception is unaffected by the no-IR flag, because this receiver never transmits. Coverage is not. Channel 12 produced real detections under world that US capture never had the chance to record, and 5500 MHz carried beacons where the US runs read empty.
+
+### Consequence for the series
+
+The affected runs are retained and flagged rather than excluded. Their 2.4 and 5 GHz observations are real measurements, and `sample_status` already separates a dwell that heard nothing from a frequency that was never visited.
+
+What the window cannot support is a 6 GHz claim. A `regulatory_skip` row at dwell 0 is a non-observation, not a negative observation. Any 6 GHz statement spanning 2026-09-05 to 2026-09-07 must drop those rows from its denominator rather than counting them as empty.
+
+The derived layer does not yet carry the regulatory domain as a series key, so this boundary is currently discoverable only from `instrument.json` per run. Promoting it belongs to the production collection contract.
+
+### Open item
+
+The domain is restored by hand and will revert on the next driver reload exactly as it did here. It is now known to be pinnable, since the userspace set took. The intended fix is `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot, paired with a collector preflight that refuses and records rather than silently sweeping a different frequency set. Neither is done.
+
+---
+
+## 4. Recording a New Change
 
 1. Capture a full sweep before touching anything, if the instrument is currently working.
 2. Make the change.
@@ -117,7 +159,7 @@ The most useful comparison is a single BSSID observed on an unchanged frequency 
 
 ---
 
-## 4. Epoch Boundary: Pre-IC-001 Capture Archived
+## 5. Epoch Boundary: Pre-IC-001 Capture Archived
 
 **Date**: 2026-08-27
 **Effect**: Layout only. No capture file was rewritten, recompressed, or deleted.

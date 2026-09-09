@@ -3,8 +3,8 @@
 title: "Wi-Fi Beacon Survey"
 description: "A fixed passive 802.11 receiver producing longitudinal analysis-ready datasets of access point beacon telemetry"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-09-03"
-version: "1.4"
+date: "2026-09-09"
+version: "1.5"
 status: "Discovery prototype"
 tags:
   - type: project-root
@@ -104,13 +104,13 @@ Scheduled execution runs as bounded hourly Semaphore jobs into the pilot path, a
 | Chains | Single antenna path; the driver reports two receive chains |
 | Host | ML01, Linux, `iw` for radio control, libpcap for capture |
 | USB | Must occupy a Bus 001 port. The host's other USB controller fails to enumerate this adapter, and nothing enforces the placement |
-| Regulatory | US. All 6 GHz frequencies enumerate as `no-ir`. The domain reverts to world across a driver reload and is currently restored by hand |
+| Regulatory | US, restored by hand after any driver reload. All 6 GHz frequencies enumerate as `no-ir` and are swept. Under the world domain they are not enumerated at all, which cost 53 runs of 6 GHz coverage in September 2026 (see IC-002) |
 | Sweep | 101 frequencies derived from live kernel regulatory state, 98 attempted, 10 s dwell, roughly 996 s per full sweep |
 | Data path | `/opt/agents/repos/storage-mounted/wifi-beacon-survey`, outside the Git repository |
 
 Capture volume is approximately 2.1 to 2.7 MB per sweep (measured across the first hourly series; larger since IC-001 raised BSSID counts), which is roughly 0.9 GB per year at daily cadence and 22 GB per year at hourly.
 
-The antenna and its position changed together on 2026-08-27, which moved both the sensitivity floor and the near-field response. Capture before and after that date is not directly comparable, and all pre-change capture now lives behind the `archive/pre-IC-001/` epoch boundary at the data root. See [IC-001](docs/instrument-changelog.md) for the measured effect, and the [operations runbook](docs/operations-runbook.md) for the USB and regulatory failure modes above.
+The antenna and its position changed together on 2026-08-27, which moved both the sensitivity floor and the near-field response. Capture before and after that date is not directly comparable, and all pre-change capture now lives behind the `archive/pre-IC-001/` epoch boundary at the data root. See [IC-001](docs/instrument-changelog.md) for the measured effect, and the [operations runbook](docs/operations-runbook.md) for the USB and regulatory failure modes above. A second boundary, [IC-002](docs/instrument-changelog.md), runs from 2026-09-05 to 2026-09-07, where a reverted regulatory domain changed the swept frequency set while leaving reception untouched.
 
 ---
 
@@ -128,7 +128,7 @@ These are measured properties of this receiver, established against retained cap
 | Sensitivity floor | Weakest mean received signal is -95.0 dBm since IC-001, against -92.3 dBm before it |
 | Near-field response | IC-001 cost 6 to 11 dB on close access points while adding far-field reach. The strongest signal now observed is roughly -34 dBm, where it was roughly -25 dBm before |
 | Run-to-run churn | Two BSSIDs lost and five gained across two sweeps 29 hours apart with no configuration change, all below -88 dBm. This is the floor any claimed change must clear |
-| 6 GHz reception | Zero beacons across all 59 frequencies in every tri-band sweep to date, including after IC-001 raised the floor to -95 dBm on an antenna rated to 7125 MHz. A measured absence, not yet distinguished from a receiver limitation |
+| 6 GHz reception | Zero beacons across all 59 frequencies in every tri-band sweep taken under the US domain, including after IC-001 raised the floor to -95 dBm on an antenna rated to 7125 MHz. A measured absence, not yet distinguished from a receiver limitation. The 53 runs taken under the world domain contribute nothing either way, because 6 GHz was not enumerated there |
 
 The Reduced Neighbor Report deserves particular note. Beacons on one band advertise co-located radios on another, which gives a single fixed station an external reference for access points that should be receivable. That is the only available path to characterising the instrument's own false-negative behaviour.
 
@@ -200,4 +200,4 @@ Capture data is deliberately absent from Git. It lives under the external data r
 
 ---
 
-Last Updated: September 3, 2026 | Status: Discovery prototype
+Last Updated: September 9, 2026 | Status: Discovery prototype

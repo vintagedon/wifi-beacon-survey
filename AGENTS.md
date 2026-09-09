@@ -3,8 +3,8 @@
 title: "Agent Instructions"
 description: "Repository identity, architectural constraints, and session conventions for agents working on wifi-beacon-survey"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-17"
-version: "1.1"
+date: "2026-09-09"
+version: "1.2"
 status: "Active"
 tags:
   - type: guide
@@ -35,6 +35,7 @@ Agents working on this repository should load context in this order:
 ## Architectural Constraints
 
 - **The receiver is passive.** It never associates, transmits, sends probe requests, injects frames, enables active monitor mode, or alters the regulatory domain. A regulatory tuning refusal is a recorded result, not an error to work around.
+- **The regulatory domain is instrument configuration, not sweep behaviour.** The declared domain is set on the host and the collector only reads it. A domain that does not match the declared one is a condition to record and refuse on, never one for a run to correct on its own. This distinction is what separates pinning the host from the passivity constraint above, and IC-002 is what it cost when nothing asserted it.
 - **Capture data never enters Git.** Sweep artifacts and identifier-bearing derived files live at `/opt/agents/repos/storage-mounted/wifi-beacon-survey`, outside this repository. Nothing in `scripts/` writes captures into the working tree, and `.gitignore` is a defensive backstop rather than the primary storage mechanism.
 - **Files are the source of record.** Retained PCAP and its sweep manifest are authoritative. PostgreSQL is a rebuildable projection and may be dropped and reconstructed at any time. Never treat a database row as evidence.
 - **The collector does not interpret.** It records what the radio observed. Entity resolution, capability judgement, congestion assessment, and anomaly detection are downstream concerns and must not influence what gets captured or how it is normalised.
