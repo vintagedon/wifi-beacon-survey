@@ -83,7 +83,9 @@ columns, with the `/2`-only keys null on `/1` rows.
 | `loads` | One row per load action: the attempt, the per-file SHA-256 of the three inputs, the outcome, the loader version, and a timestamp |
 
 A slot is the attempt's `started_utc` floored to the UTC hour, stored as a
-`timestamptz`. **Slot identity is always UTC.** Local wall-clock slot
+`timestamptz`. An attempt whose `started_utc` is missing or unreadable has
+no slot: its ledger row carries a null slot and it never joins a slot in
+`slot_health`. **Slot identity is always UTC.** Local wall-clock slot
 arithmetic would map two real hours onto one slot at the 2026-11-01
 fall-back; the collector's local-time directory names are a known, separately
 tracked collision risk and do not affect slot identity here.
@@ -126,9 +128,26 @@ run routes to `archive`. A missing or unreadable domain is
 `unresolved_domain` and is not loaded.
 
 **Fingerprints.** The loader records a SHA-256 per input file (the three
-columns of `ingest.loads`). Unchanged fingerprints make a drain a no-op. A
-changed fingerprint on an attempt already loaded records the outcome
-`source_changed` and leaves its base rows untouched.
+columns of `ingest.loads`); the triple is the attempt's fingerprint. An
+unchanged fingerprint makes a drain a no-op. A changed fingerprint on an
+attempt already loaded records the outcome `source_changed` and leaves its
+base rows untouched.
+
+**Cross-file checks.** Before loading a completed run, the loader verifies
+that every `aggregate.tsv` band and frequency appears in `frequencies.tsv`
+as `sampled`, and that each manifest row's `beacon_count` and `bssid_count`
+equal the aggregate beacon sum and distinct-BSSID count for that band and
+frequency. The relationship was verified across the whole retained archive
+before enforcement - 757 completed runs, zero mismatches - so a violation is
+a load gate: the run is not loaded, the outcome `check_failed` is recorded
+in the ledger, and the exit is non-zero for the operator to judge.
+
+**Load outcomes.** `ingest.loads.outcome` is `loaded` (base rows committed
+with the ledger record in one transaction), `source_changed` (no reload),
+`check_failed` (cross-file gate refused the load), or `failed` (the
+transaction failed; base rows rolled back, failure ledgered, next drain
+retries). The loader is [`scripts/ingest_load.py`](../scripts/ingest_load.py)
+and stamps its version into every row.
 
 **Missing hours.** An expected slot that has fully elapsed with no attempt is
 `no_run` in `derived.slot_health`. It is a gap with a reason, never zero.

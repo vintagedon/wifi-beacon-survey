@@ -3,8 +3,8 @@
 title: "Scripts"
 description: "Collector and analysis tooling for the beacon survey instrument"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-08-27"
-version: "1.2"
+date: "2026-09-29"
+version: "1.3"
 status: "Active"
 tags:
   - type: directory-readme
@@ -30,6 +30,8 @@ scripts/
 ├── pilot_database.py       # DuckDB projection rebuild from Parquet + SQL
 ├── pilot_report.py         # Deterministic Markdown briefing renderer
 ├── pilot-update.py         # Stable CLI entrypoint for the pilot pipeline
+├── ingest_contract.py      # Machine form of the ingestion contract (imported)
+├── ingest_load.py          # PostgreSQL projection loader (drain)
 └── README.md               # This file
 ```
 
@@ -47,6 +49,8 @@ scripts/
 | [pilot_database.py](pilot_database.py) | Rebuilds `derived/pilot.duckdb` from the versioned Parquet layer, verified manifests, and [`sql/pilot/pilot_views.sql`](../sql/pilot/pilot_views.sql) | ✅ Active |
 | [pilot_report.py](pilot_report.py) | Renders the deterministic technical briefing to `reports/pilot-latest.md` from fixed templates and query results; no LLM, no wall-clock prose | ✅ Active |
 | [pilot-update.py](pilot-update.py) | The stable pipeline entrypoint: enrich (idempotent, incremental) -> database -> report, with overridable roots for tests | ✅ Active |
+| [ingest_contract.py](ingest_contract.py) | Machine form of the [ingestion contract](../docs/ingestion-contract.md): exact source headers, the flattened `instrument.json` key mapping, and per-column type converters. Imported by the loader and the tests | ✅ Active |
+| [ingest_load.py](ingest_load.py) | The loader: drains `instrument.json` + `frequencies.tsv` + `aggregate.tsv` into the `wifi_beacon_survey` PostgreSQL projection, one run per transaction, fingerprint-guarded, host-domain-blind | ✅ Active |
 
 ---
 

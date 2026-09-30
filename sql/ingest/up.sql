@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS ingest.slots (
 
 CREATE TABLE IF NOT EXISTS ingest.attempts (
     run_id                              text PRIMARY KEY,
-    slot_utc_hour                       timestamptz NOT NULL
+    slot_utc_hour                       timestamptz
                                         REFERENCES ingest.slots(slot_utc_hour),
     started_utc                         timestamptz,
     instrument_schema                   text,
