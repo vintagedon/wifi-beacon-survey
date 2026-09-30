@@ -3,8 +3,8 @@
 title: "Operations Runbook"
 description: "Known failure modes of the receiver on ml01 and how to diagnose them"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-09-09"
-version: "1.2"
+date: "2026-09-29"
+version: "1.3"
 status: "Active"
 tags:
   - type: runbook
@@ -110,22 +110,22 @@ A plain `blacklist btusb` is not enough and was the form originally written here
 
 ## 4. Failure: Regulatory Domain Reverts to World
 
-**Observed**: 2026-08-16, 2026-08-27, and again 2026-09-05, each time across a driver reload. The 2026-09-05 occurrence went undetected for 53 consecutive runs and is recorded as [IC-002](instrument-changelog.md).
+**Observed**: 2026-08-16, 2026-08-27, 2026-09-05, and again 2026-09-13. The 2026-09-05 occurrence went undetected for 53 consecutive runs and is recorded as [IC-002](instrument-changelog.md). The 2026-09-13 occurrence was recorded correctly in every hourly `instrument.json` for 392 consecutive runs while nothing acted on it, and is recorded as [IC-003](instrument-changelog.md). That reversion happened without re-enumeration: both boundary runs carry the same `phy1` and USB device `1-6`, and the journal shows a boot boundary inside the flip hour, so the domain reset on the same radio rather than the adapter moving.
 
 **Signature**: `iw reg get` reports `country 00` behaviour. In the sweep manifest this appears as 2467, 2472, and 2484 MHz flagged `no-ir` rather than `disabled`, every 5 GHz frequency flagged `no-ir`, 5845, 5865, and 5885 MHz flagged `disabled`, and all 59 6 GHz frequencies flagged `disabled` with `regulatory_skip` at dwell 0. In `instrument.json` it appears as `regulatory_domain: "00"`, which is the cheapest check and the one to automate.
 
-**Severity**: worse than the 2.4 GHz signature suggests. Country 00 exposes no 5925-7125 MHz block at all, so the entire 6 GHz band stops being enumerated rather than being swept and found empty. A run under world domain looks successful and produces no 6 GHz measurement whatsoever.
+**Severity**: worse than the 2.4 GHz signature suggests. Country 00 lists the whole 5925-7125 MHz block as `disabled`, so all 59 6 GHz frequencies appear in the manifest as `regulatory_skip` rows at dwell 0 - recorded non-observations, never swept - instead of `sampled_empty` rows backed by a real dwell. A run under world domain looks successful and produces no 6 GHz measurement whatsoever; the rows are present, but they are not negative observations.
 
 **Effect on capture**: reception is unaffected, since no-IR restricts transmission only and this receiver never transmits. The effect is on the frequency set. The collector derives its sweep from live kernel regulatory state, so a domain change silently alters which frequencies are visited. Under world, 2467 MHz gets swept where US skips it.
 
-**Resolution**:
+**Resolution** (manual, now a fallback rather than the fix):
 
 ```bash
 sudo iw reg set US
 iw reg get
 ```
 
-**Persistence**: not yet solved, but no longer an open question. `sudo iw reg set US` took on 2026-09-09 and `iw reg get` returns no `phy#` section, so this driver is not self-managing its domain and the collection contract can pin it rather than only asserting it. The intended pin is `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot. Not yet applied.
+**Persistence**: superseded 2026-09-29 by the collector domain preflight, which replaces the pin. The text below is retained as background. The intended host-side pin was `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot. It was never applied, and IC-003 is what that cost. Under the amended rule the collector establishes the declared domain itself before frequency discovery - reads the effective domain, sets the declared one if it differs, verifies, records the domain found and the domain applied, and refuses the run if the declared domain cannot be established. The host configuration is left untouched. See [IC-003](instrument-changelog.md).
 
 **Design note**: the collector records per-frequency regulatory state in `frequencies.tsv`, so a domain change lands in the evidence rather than silently altering the series. That property should be stated in the collection contract rather than left implicit.
 
@@ -136,8 +136,6 @@ iw reg get
 Known and not yet addressed:
 
 - Nothing asserts which USB controller the adapter is on, so section 2 recurs silently.
-- The regulatory domain is set by hand after any driver reload. The module-layer pin in section 4 is known to be workable and is not applied.
-- Nothing asserts the domain at run start, so a reverted domain produces a run that looks successful while silently sweeping a different frequency set. This is what made IC-002 cost 53 runs instead of one.
 - A scheduled run that never fires leaves no record at all, unlike an absent receiver. The 2026-09-09 02:00 slot is the example: the host was rebooting when the job triggered, so there is no run directory to distinguish it from a slot that was never scheduled.
 
-Recently addressed: an absent receiver now produces a skip record (`run_status=skipped_no_interface`) instead of nothing, so instrument downtime is recorded in the series rather than inferred from Semaphore history. That path was exercised for 41 consecutive runs during the 2026-09-07 outage with no failures. The Bluetooth wedge in section 3 is now blocked at the module layer.
+Recently addressed: an absent receiver now produces a skip record (`run_status=skipped_no_interface`) instead of nothing, so instrument downtime is recorded in the series rather than inferred from Semaphore history. That path was exercised for 41 consecutive runs during the 2026-09-07 outage with no failures. The Bluetooth wedge in section 3 is now blocked at the module layer. The regulatory domain is now established by the collector before every sweep (section 4): a reverted domain is corrected and verified in place, or the run refuses with a recorded refusal, so a reversion can no longer produce a run that silently sweeps a different frequency set. The gap that let IC-002 cost 53 runs and IC-003 cost 392 is closed at the source.
