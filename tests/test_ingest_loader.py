@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT / "scripts"))
 
 import ingest_load  # noqa: E402
+import ingest_contract as contract  # noqa: E402
 
 TEST_DB = os.environ.get("INGEST_TEST_DB", "wifi_beacon_survey_test")
 DB_ENV_VARS = ("PGSQL01_HOST", "PGSQL01_ADMIN_USER", "PGSQL01_ADMIN_PASSWORD")
@@ -60,7 +61,7 @@ def write_tsv(path: Path, header: list[str], rows: list[list]) -> None:
 def us_manifest_rows() -> list[list]:
     return [
         ["2.4GHz", "2412", "1", "permitted", "sampled", "10",
-         "freq-2412.pcap", "2", "5", ""],
+         "freq-2412.pcap", "3", "6", ""],
         ["2.4GHz", "2467", "12", "disabled", "regulatory_skip", "0",
          "", "", "", "disabled by regulatory state"],
         ["6GHz", "5955", "1", "no-ir", "sampled_empty", "10",
@@ -74,6 +75,10 @@ def us_obs_rows() -> list[list]:
          "-50", "-45.5", "-40", TS, TS, "0.500"],
         ["2.4GHz", "2412", "1", "aa:bb:cc:00:00:02", "", "2", "100",
          "-61", "-60.0", "-59", TS, TS, "0.333"],
+        # A beacon SSID from the air can carry a NUL byte; the loader strips
+        # it because PostgreSQL text cannot store one.
+        ["2.4GHz", "2412", "1", "aa:bb:cc:00:00:04", "bad\x00ssid", "1",
+         "100", "-70", "-69.0", "-68", TS, TS, "0.166"],
     ]
 
 
@@ -302,6 +307,20 @@ def base_counts(conn) -> dict[str, int]:
     all(os.environ.get(v) for v in DB_ENV_VARS),
     "loader tests need pgsql01 credentials; run under the Doppler runtime",
 )
+class SourceSanitizeTests(unittest.TestCase):
+    def test_nul_bytes_stripped_from_text_cells(self):
+        self.assertEqual(
+            "abcd", contract.convert_value("ab\x00cd", "text", True)
+        )
+        self.assertEqual(
+            "badssid", contract.convert_value("bad\x00ssid", "ssid", False)
+        )
+
+
+@unittest.skipUnless(
+    all(os.environ.get(v) for v in DB_ENV_VARS),
+    "loader tests need pgsql01 credentials; run under the Doppler runtime",
+)
 class LoaderBehaviorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -432,9 +451,14 @@ class LoaderBehaviorTests(unittest.TestCase):
         self.assertEqual(freq, counts["survey.frequencies"])
         self.assertEqual(obs, counts["survey.observations"])
         freq, obs = self.count_fixture_rows(self.fixtures.world_v1)
+        us_freq, us_obs = self.count_fixture_rows(self.fixtures.us_v1)
+        # archive holds the world run, the PHY-override run (US-shaped), and
+        # the instrument/2 drift run (US-shaped).
         self.assertEqual(3, counts["archive.runs"])
-        self.assertEqual(3 * freq, counts["archive.frequencies"])
-        self.assertEqual(3 * obs, counts["archive.observations"])
+        self.assertEqual(
+            freq + 2 * us_freq, counts["archive.frequencies"]
+        )
+        self.assertEqual(obs + 2 * us_obs, counts["archive.observations"])
 
     def test_40_negative_observations_present(self):
         with self.conn.cursor() as cur:

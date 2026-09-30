@@ -180,7 +180,13 @@ def convert_value(raw: str | None, converter: str, nullable: bool) -> object:
     empty string (a hidden network is an empty SSID, never null). A value
     that will not parse raises ContractError: the attempt is malformed, never
     silently coerced.
+
+    The one deliberate repair: PostgreSQL text cannot store NUL bytes, and
+    beacon SSIDs from the air occasionally carry them, so text cells have
+    NUL characters stripped. Nothing else is ever altered.
     """
+    if raw is not None and "\x00" in raw:
+        raw = raw.replace("\x00", "")
     if raw is None or raw == "":
         if converter == "ssid":
             return ""

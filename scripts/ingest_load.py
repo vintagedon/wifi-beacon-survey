@@ -704,6 +704,16 @@ def drain(conn, pilot_root: Path, now: datetime | None = None) -> dict:
                     "survey" if attempt.disposition == DISPOSITION_SURVEY
                     else "archive"
                 )
+            if attempt.started_utc is not None:
+                # An attempt in the current incomplete hour (a running run)
+                # owns a slot that is not expected yet; create it so the
+                # foreign key holds. The attempt is pending, never judged,
+                # and slot_health shows it covered rather than no_run.
+                cur.execute(
+                    "INSERT INTO ingest.slots (slot_utc_hour) VALUES (%s) "
+                    "ON CONFLICT (slot_utc_hour) DO NOTHING",
+                    (utc_hour(attempt.started_utc),),
+                )
             upsert_attempt(cur, attempt)
             conn.commit()
             report["states"][attempt.state] = (

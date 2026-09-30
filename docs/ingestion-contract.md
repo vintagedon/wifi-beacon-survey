@@ -59,7 +59,10 @@ Three base tables in each of `survey` and `archive`:
 | `observations` | One row per `aggregate.tsv` data row: every source column typed, plus the run id and the source row ordinal |
 
 **Base tables hold source values only.** No derived columns, and no
-normalisation beyond type conversion. The loader never updates or deletes a
+normalisation beyond type conversion. The one deliberate repair: PostgreSQL
+text cannot store NUL bytes, and beacon SSIDs from the air occasionally
+carry them, so the loader strips NUL characters from text cells; nothing
+else is ever altered. The loader never updates or deletes a
 base row after commit; a changed source file for an already-loaded run is a
 `source_changed` finding for the operator, never a reload.
 
@@ -85,7 +88,10 @@ columns, with the `/2`-only keys null on `/1` rows.
 A slot is the attempt's `started_utc` floored to the UTC hour, stored as a
 `timestamptz`. An attempt whose `started_utc` is missing or unreadable has
 no slot: its ledger row carries a null slot and it never joins a slot in
-`slot_health`. **Slot identity is always UTC.** Local wall-clock slot
+`slot_health`. An attempt inside the current incomplete hour (a running run)
+owns its hour's slot even though that hour is not expected yet; the attempt
+is pending and never judged. **Slot identity is always UTC.** Local
+wall-clock slot
 arithmetic would map two real hours onto one slot at the 2026-11-01
 fall-back; the collector's local-time directory names are a known, separately
 tracked collision risk and do not affect slot identity here.
