@@ -170,6 +170,8 @@ Capture data is deliberately absent from Git. It lives under the external data r
 | [analyze-sweep.py](scripts/analyze-sweep.py) | Profiles a single sweep: coverage, positive controls, reception-ratio bounds, identity grouping, quality flags |
 | [probe-surfaces.py](scripts/probe-surfaces.py) | Discovers what a capture actually contains: dissector field availability, Radiotap population, Information Element census, RNR and BSS Load extraction |
 | [pilot-update.py](scripts/pilot-update.py) | Updates the pilot derived layer after every collection attempt: versioned per-run Parquet, the DuckDB projection, and `reports/pilot-latest.md` |
+| [ingest_load.py](scripts/ingest_load.py) | Drains each run's `instrument.json`, `frequencies.tsv`, and `aggregate.tsv` directly into the `wifi_beacon_survey` PostgreSQL projection, per the [ingestion contract](docs/ingestion-contract.md) |
+| [ingest_crosscheck.py](scripts/ingest_crosscheck.py) | Compares the PostgreSQL projection against the legacy DuckDB surface: run metrics, band coverage, missing slots |
 
 `probe-surfaces.py` resolves dissector field names against the installed Wireshark build before using them rather than assuming, because published references for the Reduced Neighbor Report namespace disagree with each other and with reality.
 
