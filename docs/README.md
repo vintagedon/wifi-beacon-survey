@@ -3,8 +3,8 @@
 title: "Documentation"
 description: "Project documentation, standards, and research inputs"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-09-03"
-version: "2.2"
+date: "2026-09-29"
+version: "2.3"
 status: "Active"
 tags:
   - type: directory-readme
@@ -39,6 +39,8 @@ docs/
 ├── gdr-prompt-01-mt7921au-data-surfaces.md   # Research prompt: unused hardware data surfaces
 ├── gdr-prompt-02-ard-materialization.md      # Research prompt: ARD materialization strategy
 ├── pilot-analysis-contract.md                # Provisional derived-data contract for the hourly pilot
+├── ingestion-contract.md                     # How the collector's files project into PostgreSQL
+├── ingestion-backfill-reconciliation.md      # Operator review surface for the backfill
 ├── 2026-08-27-hourly-collection-review.md    # Operator review surface: scheduling, archive, skip records
 ├── 2026-08-28-pilot-technical-briefing-review.md  # Operator review surface: enrichment and briefing findings PBR-01..08
 ├── instrument-changelog.md                   # Dated record of capture-changing modifications
@@ -55,6 +57,8 @@ docs/
 | [gdr-prompt-01-mt7921au-data-surfaces.md](gdr-prompt-01-mt7921au-data-surfaces.md) | Bounded research prompt asking what the MT7921AU and the 802.11 beacon body expose that the collector currently discards. Run across three models; findings drove the current parser scope | ✅ Active |
 | [gdr-prompt-02-ard-materialization.md](gdr-prompt-02-ard-materialization.md) | Research prompt for choosing the analysis-ready data materialization strategy after the pilot evidence is reviewed | ✅ Active |
 | [pilot-analysis-contract.md](pilot-analysis-contract.md) | Provisional, rebuildable derived-data contract for the hourly pilot: series eligibility, attempt states, versioned per-run artifacts, and the DuckDB/briefing surfaces. Machine-enforced by `scripts/pilot_contract.py` | ✅ Active |
+| [ingestion-contract.md](ingestion-contract.md) | How the collector's per-run files project into `wifi_beacon_survey`: schemas, base-table immutability, UTC slot ledger, routing by recorded domain, fingerprints, and the derived views. Machine-enforced by `scripts/ingest_contract.py` | ✅ Active |
+| [ingestion-backfill-reconciliation.md](ingestion-backfill-reconciliation.md) | The operator's review surface for the backfill: aggregate findings with evidence and closed questions, ending in the merge and spec-02 dispatch decision | 🔍 Under review |
 | [2026-08-28-pilot-technical-briefing-review.md](2026-08-28-pilot-technical-briefing-review.md) | Review surface for the pilot enrichment and briefing unit: live-evidence findings PBR-01 through PBR-08 on series enforcement, reconciliation, field resolution, grains, 6 GHz claims, scheduled integration, briefing usefulness, and PostgreSQL deferral. Each finding ends in a closed question | 🔍 Under review |
 | [2026-08-27-hourly-collection-review.md](2026-08-27-hourly-collection-review.md) | Review surface for the hourly-collection and epoch-archive spec: schedule-fault determination, archive layout, skip-record shape, cadence, output format, unenforced dependencies. Each finding ends in a closed question | 🔍 Under review |
 | [instrument-changelog.md](instrument-changelog.md) | Dated register of changes that alter what the receiver can hear, with before and after evidence. Any release spanning a change identifier must expose it | ✅ Active |

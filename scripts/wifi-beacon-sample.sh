@@ -18,9 +18,11 @@
 #   summary; the run also produces aggregate.tsv, frequencies.tsv (the sweep
 #   manifest), run.log, and a terminal summary.
 #
-#   The collector is passive: it never associates, transmits, enables active
-#   monitor mode, or alters the regulatory domain. Regulatory tuning refusals
-#   are recorded results, not fatal errors.
+#   The collector is passive: it never associates, transmits, or enables
+#   active monitor mode. Establishing the declared regulatory domain before
+#   the sweep emits nothing over the air; it is run setup, not sweep
+#   behaviour. Per-frequency tuning refusals are recorded results, not fatal
+#   errors.
 #
 # USAGE
 #   sudo ./wifi-beacon-sample.sh [options]
@@ -43,14 +45,19 @@
 #   outside this repository.
 #
 # RUN-LEVEL METADATA
-#   Every run writes instrument.json alongside the capture: run status
-#   (sweep / skipped_no_interface / failed), the active regulatory domain,
-#   and the USB controller/bus the adapter sits on. An absent interface
-#   produces a manifest-shaped skip record (headers, no frequency rows) and
-#   exits 0: instrument downtime is an observation in the series, not an
-#   error. Machine check for "receiver was down": instrument.json
-#   run_status == "skipped_no_interface". A completed sweep, however empty,
-#   has run_status == "sweep" and one manifest row per frequency.
+#   Every run writes instrument.json (schema wifi-beacon-survey/instrument/2)
+#   alongside the capture. run_status is one of: sweep (completed sweep,
+#   however empty), skipped_no_interface (receiver absent; manifest-shaped
+#   skip record, exit 0: downtime is an observation, not an error),
+#   refused_regulatory_domain (the declared domain could not be established
+#   before the sweep; header-only TSVs, no PCAP, non-zero exit), failed
+#   (collector exited before completing the sweep), running (in progress).
+#   regulatory_domain and regulatory_domain_phy are the run-start snapshot -
+#   the domain the collector FOUND. The declared domain, whether a set was
+#   attempted and its result, the effective domain at frequency discovery,
+#   and the effective domain after the sweep are recorded alongside. A
+#   post-sweep domain that differs from the declared one is recorded, not
+#   treated as an error; downstream routing decides what such a run is worth.
 #
 # =============================================================================
 
@@ -63,6 +70,16 @@ set -Eeuo pipefail
 IFACE="wlx00c0cab63b82"
 DWELL=10
 BANDS="2.4 5 6"
+# Declared regulatory domain (IC-003). The collector establishes this domain
+# before frequency discovery: read, set if the effective domain differs,
+# verify, record both, refuse if it cannot be established. Overridable for
+# testing; the deployed default is US.
+DECLARED_DOMAIN="US"
+# Preflight bounds. The timeout is a hard ceiling of 30 seconds by contract;
+# the poll interval only spaces the re-reads inside it. Both are environment-
+# overridable so the test suite can exercise the refusal path quickly.
+REG_PREFLIGHT_TIMEOUT="${REG_PREFLIGHT_TIMEOUT:-30}"
+REG_PREFLIGHT_POLL="${REG_PREFLIGHT_POLL:-2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_OUT="/opt/agents/repos/storage-mounted/wifi-beacon-survey/sweeps"
 
@@ -99,6 +116,8 @@ Options:
   -d SECONDS     Dwell time per frequency (default: 10)
   -b "BANDS"     Space-separated band filter: any of "2.4" "5" "6" (default: all)
   -o DIR         Base output directory (default: /opt/agents/repos/storage-mounted/wifi-beacon-survey/sweeps)
+  -r DOMAIN      Declared regulatory domain to establish before the sweep
+                 (default: US; the run refuses if it cannot be established)
   -h             Show this help
 
 Output (in <BASE_OUT>/<timestamp>/):
@@ -153,6 +172,56 @@ reg_domain_snapshot() {
     fi
 }
 
+# The effective domain for THIS adapter: a self-managed driver reports its
+# own country in the PHY section, and that section wins over the global one.
+# This is the same precedence the run-start snapshot records, so the preflight
+# and the instrument record can never disagree about what "found" means.
+effective_reg_domain() {
+    if [[ -n "$REG_DOMAIN_PHY" ]]; then
+        printf '%s' "$REG_DOMAIN_PHY"
+    else
+        printf '%s' "$REG_DOMAIN_GLOBAL"
+    fi
+}
+
+# Establish the declared regulatory domain before frequency discovery
+# (IC-003). Reads the effective domain; if it differs from the declared one,
+# sets the declared domain and polls until the effective domain reads as
+# declared or the bounded timeout expires. Returns non-zero when the declared
+# domain could not be established, which the caller turns into a refusal.
+# Setting the domain emits nothing over the air, so passivity is intact.
+establish_regulatory_domain() {
+    REG_SET_ATTEMPTED=0
+    REG_SET_RESULT="already_declared"
+    reg_domain_snapshot
+    local effective
+    effective="$(effective_reg_domain)"
+    [[ "$effective" == "$DECLARED_DOMAIN" ]] && return 0
+
+    REG_SET_ATTEMPTED=1
+    echo "  regulatory domain  : found ${effective}, setting declared ${DECLARED_DOMAIN}"
+    if ! iw reg set "$DECLARED_DOMAIN"; then
+        REG_SET_RESULT="failed"
+        return 1
+    fi
+
+    local deadline=$(( SECONDS + REG_PREFLIGHT_TIMEOUT ))
+    while :; do
+        reg_domain_snapshot
+        effective="$(effective_reg_domain)"
+        if [[ "$effective" == "$DECLARED_DOMAIN" ]]; then
+            REG_SET_RESULT="established"
+            echo "  regulatory domain  : verified ${DECLARED_DOMAIN}"
+            return 0
+        fi
+        if [[ "$SECONDS" -ge "$deadline" ]]; then
+            REG_SET_RESULT="failed"
+            return 1
+        fi
+        sleep "$REG_PREFLIGHT_POLL"
+    done
+}
+
 # Which USB controller and bus the adapter enumerated on. Enumeration fails
 # on one of this host's two controllers, and which port the adapter occupies
 # is a physical fact no configuration holds, so the run directory carries it.
@@ -198,8 +267,13 @@ write_instrument_json() {
     INSTRUMENT_IFACE="$IFACE" \
     INSTRUMENT_PRESENT="$INTERFACE_PRESENT" \
     INSTRUMENT_PHY="${PHY:-}" \
-    INSTRUMENT_REG_GLOBAL="$REG_DOMAIN_GLOBAL" \
-    INSTRUMENT_REG_PHY="${REG_DOMAIN_PHY:-}" \
+    INSTRUMENT_REG_GLOBAL="$REG_FOUND_GLOBAL" \
+    INSTRUMENT_REG_PHY="${REG_FOUND_PHY:-}" \
+    INSTRUMENT_REG_DECLARED="$DECLARED_DOMAIN" \
+    INSTRUMENT_REG_SET_ATTEMPTED="${REG_SET_ATTEMPTED:-0}" \
+    INSTRUMENT_REG_SET_RESULT="${REG_SET_RESULT:-}" \
+    INSTRUMENT_REG_AT_DISCOVERY="${REG_DOMAIN_AT_DISCOVERY:-}" \
+    INSTRUMENT_REG_POST_SWEEP="${REG_DOMAIN_POST_SWEEP:-}" \
     INSTRUMENT_USB_BUS="${USB_BUSNUM:-}" \
     INSTRUMENT_USB_PORT="${USB_PORT:-}" \
     INSTRUMENT_USB_DEVICE="${USB_DEVICE:-}" \
@@ -221,15 +295,25 @@ def opt(name):
     return value if value else None
 
 doc = {
-    "schema": "wifi-beacon-survey/instrument/1",
+    "schema": "wifi-beacon-survey/instrument/2",
     "run_status": os.environ["INSTRUMENT_STATUS"],
     "skip_reason": opt("INSTRUMENT_REASON"),
     "started_utc": opt("INSTRUMENT_STARTED"),
     "interface": opt("INSTRUMENT_IFACE"),
     "interface_present": os.environ["INSTRUMENT_PRESENT"] == "1",
     "phy": opt("INSTRUMENT_PHY"),
+    # Run-start snapshot: the domain the collector found, before any set.
     "regulatory_domain": opt("INSTRUMENT_REG_GLOBAL"),
     "regulatory_domain_phy": opt("INSTRUMENT_REG_PHY"),
+    # Domain preflight record (IC-003): declared, set attempt and result,
+    # the effective domain at frequency discovery, and after the sweep.
+    "regulatory_domain_declared": opt("INSTRUMENT_REG_DECLARED"),
+    "regulatory_domain_set_attempted": (
+        os.environ["INSTRUMENT_REG_SET_ATTEMPTED"] == "1"
+    ),
+    "regulatory_domain_set_result": opt("INSTRUMENT_REG_SET_RESULT"),
+    "regulatory_domain_at_discovery": opt("INSTRUMENT_REG_AT_DISCOVERY"),
+    "regulatory_domain_post_sweep": opt("INSTRUMENT_REG_POST_SWEEP"),
     "usb": {
         "bus": opt("INSTRUMENT_USB_BUS"),
         "port": opt("INSTRUMENT_USB_PORT"),
@@ -267,12 +351,13 @@ PY
 # Main
 # =============================================================================
 
-while getopts ":i:d:b:o:h" opt; do
+while getopts ":i:d:b:o:r:h" opt; do
     case "$opt" in
         i) IFACE="$OPTARG" ;;
         d) DWELL="$OPTARG" ;;
         b) BANDS="$OPTARG" ;;
         o) BASE_OUT="$OPTARG" ;;
+        r) DECLARED_DOMAIN="$OPTARG" ;;
         h) usage; exit 0 ;;
         :) echo "ERROR: -$OPTARG requires an argument" >&2; exit 2 ;;
         \?) echo "ERROR: unknown option -$OPTARG" >&2; usage >&2; exit 2 ;;
@@ -296,6 +381,11 @@ for band in $BANDS; do
     esac
 done
 
+if [[ -z "$DECLARED_DOMAIN" ]]; then
+    echo "ERROR: declared regulatory domain must not be empty" >&2
+    exit 2
+fi
+
 for cmd in iw ip tcpdump python3 date mkdir mktemp awk tee seq grep; do
     command -v "$cmd" >/dev/null 2>&1 || die "required command not found: $cmd"
 done
@@ -309,6 +399,10 @@ fi
 # the skip record must carry them too.
 STARTED_UTC="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 reg_domain_snapshot
+# The run-start snapshot is the "domain found" record and must survive the
+# preflight's own re-reads, so freeze it before anything can overwrite it.
+REG_FOUND_GLOBAL="$REG_DOMAIN_GLOBAL"
+REG_FOUND_PHY="$REG_DOMAIN_PHY"
 usb_location_snapshot
 INTERFACE_PRESENT=0
 ip link show "$IFACE" >/dev/null 2>&1 && INTERFACE_PRESENT=1
@@ -382,7 +476,7 @@ if [[ "$INTERFACE_PRESENT" -eq 1 ]]; then
 else
     echo "  interface present  : NO (ip link show $IFACE failed)"
 fi
-echo "  regulatory domain  : ${REG_DOMAIN_GLOBAL} (phy: ${REG_DOMAIN_PHY:-none})"
+echo "  regulatory domain  : ${REG_DOMAIN_GLOBAL} (phy: ${REG_DOMAIN_PHY:-none}, declared: ${DECLARED_DOMAIN})"
 if [[ -n "$USB_DEVICE" ]]; then
     echo "  usb location       : bus ${USB_BUSNUM} port ${USB_PORT} (${USB_DEVICE}) on ${USB_CONTROLLER_PCI} at ${USB_SPEED}M, driver ${USB_DRIVER:-unbound}"
 else
@@ -433,6 +527,25 @@ ip link set "$IFACE" up
 TYPE_NOW="$(iw dev "$IFACE" info | awk '$1=="type" {print $2; exit}')"
 [[ "$TYPE_NOW" == "monitor" ]] || die "failed to place $IFACE into monitor mode"
 
+# --- BEGIN DOMAIN PREFLIGHT BLOCK ---
+# The declared domain must be established before frequency discovery, because
+# discovery derives the sweep plan from live regulatory state. A preflight
+# failure is a refusal, not a die(): the run writes its terminal refusal
+# record (header-only TSVs, no PCAP) and exits non-zero, which the scheduler
+# reports as a failed task. That is the recorded outcome IC-003 needed.
+if ! establish_regulatory_domain; then
+    REG_DOMAIN_AT_DISCOVERY="$(effective_reg_domain)"
+    echo "REFUSAL: declared regulatory domain ${DECLARED_DOMAIN} could not be established (found ${REG_DOMAIN_AT_DISCOVERY})"
+    printf '%s\n' "$MANIFEST_HEADER" > "$MANIFEST"
+    printf '%s\n' "$AGG_HEADER" > "$AGG"
+    write_instrument_json "refused_regulatory_domain" \
+        "declared domain ${DECLARED_DOMAIN} not established within ${REG_PREFLIGHT_TIMEOUT}s"
+    echo "REFUSAL: refusal record written to $OUTDIR (run_status=refused_regulatory_domain)"
+    exit 1
+fi
+REG_DOMAIN_AT_DISCOVERY="$(effective_reg_domain)"
+# --- END DOMAIN PREFLIGHT BLOCK ---
+
 # -----------------------------------------------------------------------------
 # Frequency discovery from kernel-reported PHY/regulatory state.
 # AI NOTE: channel numbers are metadata only. Tuning and file naming must stay
@@ -440,6 +553,7 @@ TYPE_NOW="$(iw dev "$IFACE" info | awk '$1=="type" {print $2; exit}')"
 # a "channel 1", at 2412 and 5955 MHz respectively).
 # -----------------------------------------------------------------------------
 
+# --- BEGIN FREQUENCY DISCOVERY BLOCK ---
 iw phy "$PHY" info > "$PHYINFO"
 
 python3 - "$PHYINFO" "$FREQ_TABLE" $BANDS <<'PY' || die "frequency discovery failed"
@@ -506,6 +620,7 @@ with open(dst, "w", encoding="utf-8") as out:
         out.write(f"{classify(freq)}\t{freq}\t{chan}\t{state}\n")
 PY
 
+# --- END FREQUENCY DISCOVERY BLOCK ---
 PERMITTED="$(awk -F'\t' '$4 != "disabled"' "$FREQ_TABLE" | wc -l | tr -d ' ')"
 DISABLED="$(awk -F'\t' '$4 == "disabled"' "$FREQ_TABLE" | wc -l | tr -d ' ')"
 echo "Frequency discovery: $(wc -l < "$FREQ_TABLE" | tr -d ' ') listed, ${PERMITTED} permitted, ${DISABLED} disabled"
@@ -922,6 +1037,15 @@ if sampled + empty == 0:
     print("ERROR: no frequencies were successfully sampled", file=sys.stderr)
     sys.exit(1)
 PY
+
+# Post-sweep domain record. A domain that drifted during the sweep is a
+# recorded fact, not an error: the sweep itself ran on the declared domain,
+# and downstream routing decides what a drifted run is worth.
+reg_domain_snapshot
+REG_DOMAIN_POST_SWEEP="$(effective_reg_domain)"
+if [[ "$REG_DOMAIN_POST_SWEEP" != "$DECLARED_DOMAIN" ]]; then
+    echo "NOTE: post-sweep regulatory domain is ${REG_DOMAIN_POST_SWEEP}, differs from declared ${DECLARED_DOMAIN}; recorded"
+fi
 
 # Terminal success: the run directory is a completed sweep. The terminal
 # summary exits non-zero on capture errors, so reaching here means the sweep

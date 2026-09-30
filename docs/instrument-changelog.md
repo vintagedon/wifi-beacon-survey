@@ -3,8 +3,8 @@
 title: "Instrument Changelog"
 description: "Dated record of capture-changing modifications to the receiver, with before and after evidence"
 author: "VintageDon (https://github.com/vintagedon/)"
-date: "2026-09-09"
-version: "1.1"
+date: "2026-09-29"
+version: "1.2"
 status: "Active"
 tags:
   - type: reference
@@ -30,7 +30,8 @@ Each entry carries a change identifier. Any dataset release spanning a change id
 | ID | Date | Change | Reversible | Effect |
 |----|------|--------|------------|--------|
 | IC-001 | 2026-08-27 | Antenna replacement and sensor repositioning | No, in practice | Large far-field sensitivity gain, 6 to 11 dB near-field loss |
-| IC-002 | 2026-09-05 | Regulatory domain reverted to world (00) for 53 consecutive runs | Yes, for capture after 2026-09-09 | 6 GHz not enumerated at all; 2.4 GHz channel 12-14 and upper 5 GHz coverage inverted |
+| IC-002 | 2026-09-05 | Regulatory domain reverted to world (00) for 53 consecutive runs | Yes, for capture after 2026-09-09 | 6 GHz frequencies listed `disabled` and recorded as `regulatory_skip` rows at dwell 0, never swept; 2.4 GHz channel 12-14 and upper 5 GHz coverage inverted |
+| IC-003 | 2026-09-13 | Regulatory domain reverted to world (00) for 392 consecutive runs; recorded each hour but not acted on until 2026-09-29 | Yes, for capture after 2026-09-29 (runs archived, not dropped) | Same frequency-set inversion as IC-002; resolved by the collector domain preflight |
 
 The reference sweep for the current instrument state is `pilot/20260827-060013`: full tri-band, 10 s dwell, US regulatory domain. It is the baseline any future change is measured against.
 
@@ -120,7 +121,7 @@ The boundary is exact. `20260905-020003` swept under US on `phy6`. The 03:00 slo
 
 ### Effect on the frequency set
 
-Under country 00 the kernel exposes no 5925-7125 MHz block at all. The 6 GHz band was not merely restricted, it did not exist to be tuned.
+Under country 00 the kernel lists the 5925-7125 MHz block as `disabled` rather than removing it. The 6 GHz frequencies were therefore present in every world-domain sweep: all 59 rows appear in each manifest as `regulatory_skip` at dwell 0. They are non-observations - listed and skipped by regulatory state, never tuned - not omitted rows, and not negative observations either.
 
 | Frequencies | Under US | Under world |
 |-------------|----------|-------------|
@@ -143,11 +144,37 @@ The derived layer does not yet carry the regulatory domain as a series key, so t
 
 ### Open item
 
-The domain is restored by hand and will revert on the next driver reload exactly as it did here. It is now known to be pinnable, since the userspace set took. The intended fix is `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot, paired with a collector preflight that refuses and records rather than silently sweeping a different frequency set. Neither is done.
+The domain is restored by hand and will revert on the next driver reload exactly as it did here. It is now known to be pinnable, since the userspace set took. The intended fix is `options cfg80211 ieee80211_regdom=US` under `/etc/modprobe.d` with an initramfs rebuild, verified across a cold boot, paired with a collector preflight that refuses and records rather than silently sweeping a different frequency set. Neither is done. *Superseded 2026-09-29 by IC-003: the operator amended the rule so the collector establishes the domain itself, and the modprobe pin was never applied.*
 
 ---
 
-## 4. Recording a New Change
+## 4. IC-003: Regulatory Domain Reverted to World for 392 Runs, Recorded but Not Acted On
+
+**Date**: reversion 2026-09-13 01:00 EDT, restored by hand before the 09:00 EDT run on 2026-09-29
+**Type**: Capture-changing, recoverable for future capture but not for the affected window
+**Evidence**: `pilot/20260913-000003` (last US run, started 2026-09-13T04:00:03Z) against `pilot/20260913-010003` (first world run, started 2026-09-13T05:00:03Z), with all figures recomputed from `instrument.json` across the pilot tree at execution time
+
+### What changed
+
+The global regulatory domain reverted from US to world (00), as it had on 2026-08-16, 2026-08-27, and 2026-09-05. This time every run recorded the reversion in its own `instrument.json` from the first affected hour onward, and nothing acted on the record for 392 consecutive completed runs, `20260913-010003` through `20260929-080003`. The operator restored the domain by hand and `20260929-090003` recorded US.
+
+The boundary is exact and the adapter did not move. Both boundary runs record `phy1` and USB device `1-6`, so the flip happened in place on the same radio without re-enumeration.
+
+Boot identity is not recorded in `instrument.json`, so the cause cannot be read from the run record alone. `journalctl --list-boots` is readable and shows a boot boundary inside the flip hour: the prior boot ended 2026-09-13 00:42:45 EDT and the current one began 00:43:21 EDT, making `20260913-010003` the first run after that reboot. ML01 rebooted again on 2026-09-28 (08:54:50 to 08:56:16 EDT) with no missed slot, and the domain remained 00 across that boot. The working explanation is that cfg80211 came up on its default world domain because the IC-002 module pin was never applied; `grep -ri regdom /etc/modprobe.d/` returns nothing, confirming the pin is absent.
+
+### Effect on the frequency set
+
+The same inversion as IC-002: under world, 2467, 2472, and 2484 MHz read `no-ir` and are swept where US skips them as `disabled`, every 5 GHz frequency reads `no-ir`, 5845, 5865, and 5885 MHz read `disabled`, and all 59 6 GHz frequencies read `disabled`. Every world-domain manifest lists all 101 frequencies; the 6 GHz rows are `regulatory_skip` at dwell 0 - non-observations recorded as explicitly as any other outcome, never omitted rows.
+
+### Why detection was not enough
+
+IC-002 was a detection failure: nothing read the domain for 53 runs. IC-003 was an action failure: the domain was recorded correctly in every run's `instrument.json` for 16 days while the briefing's 6 GHz regulatory-skip count rose each hour. A record nobody acts on and a missing record cost the same 392 runs of 6 GHz coverage.
+
+The operator's disposition on 2026-09-29 supersedes IC-002's retain-and-flag: the affected runs are archived queryable in the `archive` schema of the PostgreSQL projection rather than merely flagged, their files remain the source of record, and the rule is amended so the collector establishes the declared domain itself before frequency discovery - read the effective domain, set the declared one if it differs, verify, record the domain found and the domain applied, and refuse the run if the declared domain cannot be established. Setting the domain emits nothing, so the passivity constraint is intact. The preflight is the resolution of this entry and lands with it.
+
+---
+
+## 5. Recording a New Change
 
 1. Capture a full sweep before touching anything, if the instrument is currently working.
 2. Make the change.
@@ -159,7 +186,7 @@ The most useful comparison is a single BSSID observed on an unchanged frequency 
 
 ---
 
-## 5. Epoch Boundary: Pre-IC-001 Capture Archived
+## 6. Epoch Boundary: Pre-IC-001 Capture Archived
 
 **Date**: 2026-08-27
 **Effect**: Layout only. No capture file was rewritten, recompressed, or deleted.
